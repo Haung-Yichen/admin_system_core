@@ -70,7 +70,11 @@ class ConfigLoader:
             },
             "ragic": {
                 "api_key": os.getenv("RAGIC_API_KEY", ""),
-                "base_url": os.getenv("RAGIC_BASE_URL", "https://ap13.ragic.com")
+                "base_url": os.getenv("RAGIC_BASE_URL", "https://ap13.ragic.com"),
+                "employee_sheet_path": os.getenv("RAGIC_EMPLOYEE_SHEET_PATH", "/HSIBAdmSys/-3/4"),
+                "field_email": os.getenv("RAGIC_FIELD_EMAIL", "1000381"),
+                "field_name": os.getenv("RAGIC_FIELD_NAME", "1000376"),
+                "field_door_access_id": os.getenv("RAGIC_FIELD_DOOR_ACCESS_ID", "1000375")
             }
         }
     

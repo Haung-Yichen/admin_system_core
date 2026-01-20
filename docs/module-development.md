@@ -1,307 +1,148 @@
-# 模組開發指南
+# 模組開發指南 (Module Development Guide)
 
 本文檔說明如何在 Admin System Core 框架上開發業務模組。
 
+## 前置準備
+
+開發前請先閱讀 [框架總覽 (Framework Overview)](framework.md) 以了解系統架構。
+
 ---
 
-## 快速開始
+## 開發規範
 
-### 1. 建立模組檔案
+### 1. 核心開發哲學
 
-在 `modules/` 目錄下建立新的 Python 檔案：
+*   **框架負責基礎建設，模組負責業務邏輯**
+    *   **Core**: DB 連線、安全性、Config、Log。
+    *   **Module**: Chatbot 邏輯、訂單處理、使用者管理。
+
+*   **不要重複造輪子**
+    *   若需通用功能 (如 Redis, Email)，請使用框架提供的服務，或請求核心團隊支援。
+
+*   **依賴注入 (Dependency Injection)**
+    *   多加利用 FastAPI 的 `Depends` 與框架提供的 Service Provider。
+
+### 2. 目錄結構
+
+標準模組結構如下 (以 `chatbot` 為例)：
 
 ```
-modules/
-├── __init__.py
-├── echo_module.py      # 範例模組
-└── your_module.py      # 你的新模組
+modules/chatbot/
+├── __init__.py             # 匯出模組類別
+├── chatbot_module.py       # 實作 IAppModule (模組入口)
+├── core/
+│   └── config.py           # 模組專屬設定 (SOP_BOT_*)
+├── routers/
+│   ├── __init__.py         # Router 聚合
+│   └── bot.py              # API Endpoints
+├── services/               # 業務邏輯 Service
+├── models/                 # SQLAlchemy Models
+└── schemas/                # Pydantic Schemas
 ```
 
-### 2. 實作 IAppModule 介面
+---
+
+## 使用框架服務 (Using Framework Services)
+
+### 1. 資料庫 (Database)
+
+框架已全面接管資料庫連線。**禁止** 模組自行建立 Engine。
+
+#### 一般 API 開發 (FastAPI Dependency)
+```python
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from core.database.session import get_db_session
+
+@router.get("/items")
+async def get_items(db: AsyncSession = Depends(get_db_session)):
+    # db 會在 request 結束後自動 commit/close
+    result = await db.execute(...)
+    return result.all()
+```
+
+#### 背景任務開發 (Background Tasks)
+若在獨立 Thread 或背景任務中，請使用 `get_thread_local_session`：
 
 ```python
-from typing import Optional, Dict, Any
+from core.database.session import get_thread_local_session
+
+async def background_job():
+    # 建立專屬 Session，避免跨 Thread 問題
+    async with get_thread_local_session() as session:
+        await session.execute(...)
+```
+
+### 2. 資料安全性 (Data Security)
+
+對於敏感個資 (Email, 手機, ID)，**必須** 使用框架提供的加密欄位。
+
+```python
+from sqlalchemy.orm import Mapped, mapped_column
+from core.database.base import Base
+from core.security import EncryptedType
+
+> [!TIP]
+> 系統已內建 `User` 模型 (`core.models.User`) 處理員工身份與 LINE 綁定。除非您需要建立額外的會員或客戶資料，否則無需自行建立使用者表。
+
+```python
+from sqlalchemy.orm import Mapped, mapped_column
+from core.database.base import Base
+from core.security import EncryptedType
+
+# 範例：建立一個包含敏感資料的客戶表
+class Customer(Base):
+    __tablename__ = "customers"
+    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    
+    # 自動加密儲存，讀取時自動解密
+    email: Mapped[str] = mapped_column(EncryptedType(512), nullable=False)
+    phone: Mapped[str] = mapped_column(EncryptedType(256), nullable=True)
+```
+```
+
+### 3. 設定管理 (Configuration)
+
+模組應定義專屬的 `Settings` 類別，並使用前綴隔離環境變數。
+
+```python
+# modules/chatbot/core/config.py
+from pydantic_settings import BaseSettings
+from pydantic import Field
+
+class ChatbotSettings(BaseSettings):
+    # 對應環境變數 SOP_BOT_APP_NAME
+    app_name: str = Field(validation_alias="SOP_BOT_APP_NAME") 
+```
+
+### 4. 模組入口 (Module Entry)
+
+實作 `IAppModule` 以整合進系統：
+
+```python
+# modules/chatbot/chatbot_module.py
 from core.interface import IAppModule
 from core.app_context import AppContext
 
-
-class YourModule(IAppModule):
-    """你的模組描述"""
-    
-    def get_module_name(self) -> str:
-        """回傳模組的唯一識別名稱"""
-        return "your_module"
-    
-    def on_entry(self, context: AppContext) -> None:
-        """模組初始化時呼叫"""
-        context.log_event("Your module loaded", "MODULE")
-    
-    def handle_event(
-        self, 
-        context: AppContext, 
-        event: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """處理路由到此模組的事件"""
-        return {"status": "ok"}
-    
-    def get_menu_config(self) -> Dict[str, Any]:
-        """(選填) 回傳 GUI 選單配置"""
-        return {
-            "label": "Your Module",
-            "icon": "custom_icon",
-            "actions": []
-        }
-    
-    def on_shutdown(self) -> None:
-        """(選填) 模組關閉時呼叫，用於清理資源"""
-        pass
-
-    def get_status(self) -> Dict[str, Any]:
-        """(選填) 回傳模組狀態供 GUI 監控顯示"""
-        return {
-            "status": "active", # active, warning, error, initializing
-            "details": {
-                "Connection": "Connected",
-                "Queue Size": 0
-            }
-        }
-```
-
-### 3. 自動載入
-
-將檔案放入 `modules/` 目錄後，框架會自動：
-
-1. 掃描所有 `*.py` 檔案（排除 `_` 開頭的檔案）
-2. 尋找實作 `IAppModule` 的類別
-3. 實例化並註冊到 `ModuleRegistry`
-4. 呼叫 `on_entry()` 進行初始化
-
----
-
-## 核心概念
-
-### AppContext (依賴注入容器)
-
-`AppContext` 提供所有模組共用的服務：
-
-```python
-def handle_event(self, context: AppContext, event: dict):
-    # 取得設定
-    debug_mode = context.config.get("app.debug", False)
-    
-    # 記錄事件 (會顯示在 GUI 和日誌)
-    context.log_event("處理事件中", "INFO")
-    
-    # 使用 LINE 客戶端
-    line_client = context.line_client
-    
-    # 使用 Ragic 服務
-    ragic = context.ragic_service
-```
-
-### 事件路由
-
-事件透過兩種方式路由到模組：
-
-#### 方式一：訊息前綴
-
-```
-"模組名稱:內容"
-```
-
-例如發送 `leave:apply` 會路由到 `leave` 模組，並設定：
-
-```python
-event = {
-    "message": "leave:apply",
-    "parsed_payload": "apply"  # 冒號後的內容
-}
-```
-
-#### 方式二：明確指定模組
-
-```python
-event = {
-    "module": "leave",
-    "action": "approve",
-    "data": {...}
-}
-```
-
----
-
-## 使用內建服務
-
-### LINE 訊息發送
-
-```python
-from utils import line_messages as msg
-
-async def handle_event(self, context: AppContext, event: dict):
-    reply_token = event.get("reply_token")
-    
-    if reply_token:
-        # 使用工具函數建立訊息
-        messages = [
-            msg.text("你好！"),
-            msg.confirm_template(
-                alt_text="確認",
-                body_text="是否確認？",
-                yes_label="是", yes_data="yes",
-                no_label="否", no_data="no"
-            )
-        ]
+class ChatbotModule(IAppModule):
+    def on_entry(self, context: AppContext):
+        # 取得全域服務
+        self.config = context.config
         
-        await context.line_client.post_reply(reply_token, messages)
-```
-
-### Ragic 資料庫操作
-
-```python
-async def handle_event(self, context: AppContext, event: dict):
-    ragic = context.ragic_service
-    
-    # 讀取記錄
-    records = await ragic.get_records("forms/1", {"status": "pending"})
-    
-    # 建立記錄
-    new_id = await ragic.create_record("forms/1", {"name": "新記錄"})
-    
-    # 更新記錄
-    await ragic.update_record("forms/1", record_id=123, data={"status": "done"})
-    
-    # 刪除記錄
-    await ragic.delete_record("forms/1", record_id=123)
+        # 啟動初始化邏輯...
+        context.log_event("Chatbot module loaded", "INFO")
 ```
 
 ---
 
-## 完整範例：請假模組
+## 常見問題 (FAQ)
 
-```python
-"""
-Leave Module - 請假申請管理
-"""
-from typing import Optional, Dict, Any
-from core.interface import IAppModule
-from core.app_context import AppContext
-from utils import line_messages as msg
+**Q: 如何新增資料庫 Table？**
+A: 在模組的 `models/` 目錄定義 SQLAlchemy Model。目前需手動處理 Migration。
 
+**Q: 背景任務報錯 `Task attached to a different loop`？**
+A: 這是因為在不同 Thread 共用 Session。請確保背景任務使用 `get_thread_local_session()`。
 
-class LeaveModule(IAppModule):
-    """請假申請模組"""
-    
-    # Ragic 表單路徑
-    SHEET_PATH = "forms/leave_requests"
-    
-    def get_module_name(self) -> str:
-        return "leave"
-    
-    def on_entry(self, context: AppContext) -> None:
-        context.log_event("請假模組已載入", "MODULE")
-    
-    def handle_event(
-        self, 
-        context: AppContext, 
-        event: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """
-        處理請假相關事件
-        
-        支援的指令：
-        - leave:apply - 申請請假
-        - leave:status - 查詢狀態
-        """
-        action = event.get("parsed_payload", "").strip()
-        
-        if action == "apply":
-            return self._handle_apply(context, event)
-        elif action == "status":
-            return self._handle_status(context, event)
-        else:
-            return {"status": "error", "message": "未知指令"}
-    
-    def _handle_apply(self, context: AppContext, event: dict) -> dict:
-        """處理請假申請"""
-        context.log_event("收到請假申請", "LEAVE")
-        # 實作業務邏輯...
-        return {"status": "ok", "action": "apply_started"}
-    
-    def _handle_status(self, context: AppContext, event: dict) -> dict:
-        """查詢請假狀態"""
-        context.log_event("查詢請假狀態", "LEAVE")
-        # 實作業務邏輯...
-        return {"status": "ok", "records": []}
-    
-    def get_menu_config(self) -> Dict[str, Any]:
-        return {
-            "label": "請假管理",
-            "icon": "calendar",
-            "actions": [
-                {"label": "申請請假", "command": "leave:apply"},
-                {"label": "查詢狀態", "command": "leave:status"}
-            ]
-        }
-```
-
----
-
-## 最佳實踐
-
-1. **模組命名**: 使用小寫英文加底線 (`leave_management`)
-2. **單一職責**: 每個模組只處理一個業務領域
-3. **錯誤處理**: 使用 try-except 並記錄錯誤到 `context.log_event()`
-4. **非同步操作**: LINE 和 Ragic 服務使用 async/await
-5. **配置管理**: 使用 `context.config.get()` 讀取設定，不要硬編碼
-
----
-
-## 測試模組
-
-### 手動測試
-
-1. 啟動應用程式
-2. 使用 API 發送測試事件：
-
-```bash
-curl -X POST http://localhost:8000/webhook/generic \
-  -H "Content-Type: application/json" \
-  -d '{"module": "your_module", "action": "test"}'
-```
-
-### 查看日誌
-
-- **GUI Dashboard**: 查看 EVENT LOG 面板
-- **API**: `GET http://localhost:8000/api/logs`
-
----
-
-## 檔案結構建議
-
-複雜模組可使用子目錄：
-
-```
-modules/
-├── leave/
-│   ├── __init__.py      # 匯出 LeaveModule
-│   ├── module.py        # 主模組類別
-│   ├── handlers.py      # 事件處理函數
-│   └── templates.py     # LINE 訊息模板
-```
-
-在 `__init__.py` 中匯出：
-
-```python
-from .module import LeaveModule
-
-__all__ = ["LeaveModule"]
-```
-
----
-
-## 相關文件
-
-- [IAppModule 介面定義](../core/interface.py)
-- [AppContext 依賴容器](../core/app_context.py)
-- [LINE 訊息工具](../utils/line_messages.py)
-- [Ragic 服務](../services/ragic_service.py)
+**Q: 我需要 Redis 怎麼辦？**
+A: 目前框架尚未內建 Redis。若有強烈需求，請聯繫架構組評估加入 `core.services`。

@@ -20,6 +20,9 @@ env/
 *.log
 logs/
 
+# SSL Certificates (NEVER commit private keys!)
+certs/
+
 # OS
 .DS_Store
 Thumbs.db

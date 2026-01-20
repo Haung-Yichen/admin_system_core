@@ -1,8 +1,8 @@
 """
-Ragic Service for Chatbot Module.
+Core Ragic Service.
 
-Handles employee data lookup from Ragic API with fuzzy field matching.
-This wraps and extends the core RagicService with chatbot-specific logic.
+Handles all Ragic API communication for employee verification.
+This is a framework-level service used by all modules requiring Ragic integration.
 """
 
 import logging
@@ -10,8 +10,7 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from core.app_context import ConfigLoader
-from modules.chatbot.core.config import get_chatbot_settings
-from modules.chatbot.schemas import RagicEmployeeData
+from core.schemas.auth import RagicEmployeeData
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +18,13 @@ logger = logging.getLogger(__name__)
 class RagicFieldConfig:
     """Configuration for Ragic field mapping."""
     
-    def __init__(self) -> None:
-        settings = get_chatbot_settings()
-        self.email_id = settings.ragic_field_email
-        self.name_id = settings.ragic_field_name
-        self.door_access_id = settings.ragic_field_door_access_id
+    def __init__(self, config: dict[str, Any]) -> None:
+        ragic_config = config.get("ragic", {})
+        
+        # Field IDs from config
+        self.email_id = ragic_config.get("field_email", "1000381")
+        self.name_id = ragic_config.get("field_name", "1000376")
+        self.door_access_id = ragic_config.get("field_door_access_id", "1000375")
         
         # Chinese name mappings for fuzzy matching
         self.email_names = ["E-mail", "電子郵件", "email", "Email", "郵件"]
@@ -33,23 +34,23 @@ class RagicFieldConfig:
 
 class RagicService:
     """
-    Ragic API service for employee verification.
+    Core Ragic API service for employee verification.
     
     Uses fuzzy field name matching to handle Chinese field names
     returned by the Ragic API.
     """
     
     def __init__(self) -> None:
-        self._settings = get_chatbot_settings()
-        self._field_config = RagicFieldConfig()
+        # Load global config
+        self._config_loader = ConfigLoader()
+        self._config_loader.load()
         
-        # Load global config for shared resources
-        config_loader = ConfigLoader()
-        config_loader.load()
+        ragic_config = self._config_loader.get("ragic", {})
+        self._base_url = ragic_config.get("base_url", "https://ap13.ragic.com")
+        self._api_key = ragic_config.get("api_key", "")
+        self._sheet_path = ragic_config.get("employee_sheet_path", "/HSIBAdmSys/-3/4")
         
-        self._base_url = config_loader.get("ragic.base_url", "https://ap13.ragic.com")
-        self._api_key = config_loader.get("ragic.api_key", "")
-        self._sheet_path = self._settings.ragic_employee_sheet_path
+        self._field_config = RagicFieldConfig(self._config_loader._config)
     
     def _get_field_value(
         self,

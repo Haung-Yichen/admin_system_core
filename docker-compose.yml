@@ -47,6 +47,18 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+      - ./certs:/tmp/certs:ro  # Mount to tmp first
+    command: >
+      bash -c "
+      cp /tmp/certs/server.crt /var/lib/postgresql/server.crt &&
+      cp /tmp/certs/server.key /var/lib/postgresql/server.key &&
+      chown postgres:postgres /var/lib/postgresql/server.key &&
+      chmod 600 /var/lib/postgresql/server.key &&
+      docker-entrypoint.sh postgres
+      -c ssl=on
+      -c ssl_cert_file=/var/lib/postgresql/server.crt
+      -c ssl_key_file=/var/lib/postgresql/server.key
+      "
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s

@@ -31,22 +31,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy Python packages from builder
-COPY --from=builder /root/.local /root/.local
-
-# Make sure scripts in .local are usable
-ENV PATH=/root/.local/bin:$PATH
-
-# Copy application code
-COPY core ./core
-COPY modules ./modules
-COPY services ./services
-COPY api ./api
-COPY utils ./utils
-COPY main.py .
-
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash appuser
+
+# Copy Python packages from builder to appuser home
+COPY --from=builder /root/.local /home/appuser/.local
+
+# Ensure permissions
+RUN chown -R appuser:appuser /home/appuser/.local
+
+# Make sure scripts in .local are usable
+ENV PATH=/home/appuser/.local/bin:$PATH
+
+# Copy application code
+COPY --chown=appuser:appuser . /app
+
 USER appuser
 
 # Expose port

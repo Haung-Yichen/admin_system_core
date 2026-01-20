@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from modules.chatbot.db import get_db_session
+from core.database import get_db_session
 from modules.chatbot.models import SOPDocument
 from modules.chatbot.schemas import (
     SearchQuery,

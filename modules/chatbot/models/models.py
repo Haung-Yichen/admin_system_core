@@ -1,77 +1,21 @@
 """
-SQLAlchemy Database Models.
+SQLAlchemy Database Models for Chatbot Module.
 
-Defines the core database entities: User and SOPDocument.
+Defines chatbot-specific entities: SOPDocument.
 Uses pgvector for vector similarity search on embeddings.
+Sensitive fields are encrypted using framework-level EncryptedType.
 """
 
-from datetime import datetime
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Boolean, DateTime, Index, String, Text
+from sqlalchemy import Boolean, Index, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from modules.chatbot.core.config import get_chatbot_settings
-from modules.chatbot.db.base import Base, TimestampMixin, UUIDPrimaryKey
-
-
-class User(Base, TimestampMixin):
-    """
-    User model representing authenticated employees.
-    
-    Attributes:
-        id: UUID primary key.
-        line_user_id: Unique LINE user identifier for message routing.
-        email: Employee email address (verified via Ragic).
-        ragic_employee_id: Reference ID from Ragic database.
-        display_name: User's display name from LINE profile.
-        is_active: Whether the user account is active.
-        last_login_at: Timestamp of last successful authentication.
-    """
-    
-    __tablename__ = "users"
-    
-    id: Mapped[UUIDPrimaryKey]
-    line_user_id: Mapped[str] = mapped_column(
-        String(64),
-        unique=True,
-        index=True,
-        nullable=False,
-        comment="LINE platform user ID",
-    )
-    email: Mapped[str] = mapped_column(
-        String(255),
-        unique=True,
-        index=True,
-        nullable=False,
-        comment="Verified employee email",
-    )
-    ragic_employee_id: Mapped[str | None] = mapped_column(
-        String(64),
-        nullable=True,
-        comment="Employee ID from Ragic database",
-    )
-    display_name: Mapped[str | None] = mapped_column(
-        String(255),
-        nullable=True,
-        comment="User display name from LINE",
-    )
-    is_active: Mapped[bool] = mapped_column(
-        Boolean,
-        default=True,
-        nullable=False,
-        comment="Account active status",
-    )
-    last_login_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-        comment="Last successful login timestamp",
-    )
-    
-    def __repr__(self) -> str:
-        return f"<User(id={self.id}, email={self.email}, line_user_id={self.line_user_id})>"
+from core.database.base import Base, TimestampMixin, UUIDPrimaryKey
+from core.security import EncryptedType
 
 
 def _get_embedding_dimension() -> int:
@@ -106,9 +50,9 @@ class SOPDocument(Base, TimestampMixin):
         comment="SOP document title",
     )
     content: Mapped[str] = mapped_column(
-        Text,
+        EncryptedType(8192),  # Larger size for encrypted SOP content
         nullable=False,
-        comment="Full text content of the SOP",
+        comment="Full text content of the SOP (Encrypted)",
     )
     embedding: Mapped[list[float] | None] = mapped_column(
         Vector(_get_embedding_dimension()),  # Dynamic dimension from config
@@ -155,49 +99,3 @@ class SOPDocument(Base, TimestampMixin):
     
     def __repr__(self) -> str:
         return f"<SOPDocument(id={self.id}, title={self.title[:50]}...)>"
-
-
-class UsedToken(Base):
-    """
-    Model for tracking used magic link tokens (one-time use enforcement).
-    
-    Stores the token hash (not the token itself) to prevent reuse.
-    Tokens are automatically cleaned up after expiration.
-    
-    Attributes:
-        id: UUID primary key.
-        token_hash: SHA256 hash of the JWT token.
-        email: Email associated with the token.
-        used_at: When the token was used.
-        expires_at: When the token expires (for cleanup).
-    """
-    
-    __tablename__ = "used_tokens"
-    
-    id: Mapped[UUIDPrimaryKey]
-    token_hash: Mapped[str] = mapped_column(
-        String(64),  # SHA256 hex = 64 chars
-        unique=True,
-        index=True,
-        nullable=False,
-        comment="SHA256 hash of the used token",
-    )
-    email: Mapped[str] = mapped_column(
-        String(255),
-        nullable=False,
-        comment="Email associated with this token",
-    )
-    used_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        comment="When the token was used",
-    )
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        index=True,
-        comment="Token expiration time (for cleanup)",
-    )
-    
-    def __repr__(self) -> str:
-        return f"<UsedToken(hash={self.token_hash[:8]}..., email={self.email})>"

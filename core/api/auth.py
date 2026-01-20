@@ -1,32 +1,33 @@
 """
-Authentication Router.
+Core Authentication Router.
 
-Handles Magic Link authentication flow endpoints.
+Unified authentication API endpoints for the entire system.
+Handles Magic Link authentication flow.
 """
 
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from modules.chatbot.core.config import get_chatbot_settings
-from modules.chatbot.core.rate_limiter import magic_link_limiter
-from modules.chatbot.core.security import TokenExpiredError, TokenInvalidError
-from modules.chatbot.db import get_db_session
-from modules.chatbot.schemas import (
+from core.app_context import ConfigLoader
+from core.database import get_db_session
+from core.schemas.auth import (
     ErrorResponse,
     MagicLinkRequest,
     MagicLinkResponse,
     VerifyTokenRequest,
     VerifyTokenResponse,
 )
-from modules.chatbot.services import (
+from core.services.auth import (
     AuthService,
     EmailNotFoundError,
     EmailSendError,
     TokenAlreadyUsedError,
+    TokenExpiredError,
+    TokenInvalidError,
     UserBindingError,
     get_auth_service,
 )
@@ -36,8 +37,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
+def _get_app_config() -> dict:
+    """Get application configuration."""
+    loader = ConfigLoader()
+    loader.load()
+    return {
+        "app_name": loader.get("server.app_name", "Admin System"),
+        "magic_link_expire_minutes": loader.get("security.magic_link_expire_minutes", 15),
+    }
+
+
 def get_login_html(line_id: str, error: str | None = None, success: str | None = None) -> str:
-    settings = get_chatbot_settings()
+    config = _get_app_config()
+    app_name = config["app_name"]
+    expire_minutes = config["magic_link_expire_minutes"]
     
     error_html = f'<div class="alert alert-error">⚠️ {error}</div>' if error else ""
     success_html = f'<div class="alert alert-success">✅ {success}</div>' if success else ""
@@ -48,7 +61,7 @@ def get_login_html(line_id: str, error: str | None = None, success: str | None =
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>身份驗證 | {settings.app_name}</title>
+    <title>身份驗證 | {app_name}</title>
     <style>
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
         body {{ font-family: -apple-system, sans-serif; background: linear-gradient(135deg, #00B900, #00A000); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }}
@@ -81,7 +94,7 @@ def get_login_html(line_id: str, error: str | None = None, success: str | None =
                 <button type="submit" class="submit-btn">📧 發送驗證連結</button>
             </form>
         </div>
-        <div class="footer"><p>連結有效期限 {settings.magic_link_expire_minutes} 分鐘</p></div>
+        <div class="footer"><p>連結有效期限 {expire_minutes} 分鐘</p></div>
     </div>
 </body>
 </html>
@@ -89,7 +102,8 @@ def get_login_html(line_id: str, error: str | None = None, success: str | None =
 
 
 def get_verification_result_html(success: bool, message: str) -> str:
-    settings = get_chatbot_settings()
+    config = _get_app_config()
+    app_name = config["app_name"]
     icon = "✅" if success else "❌"
     title = "驗證成功！" if success else "驗證失敗"
     bg = "#00B900" if success else "#DC2626"
@@ -100,7 +114,7 @@ def get_verification_result_html(success: bool, message: str) -> str:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{title} | {settings.app_name}</title>
+    <title>{title} | {app_name}</title>
     <style>
         body {{ font-family: -apple-system, sans-serif; background: linear-gradient(135deg, {bg}, {bg}dd); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }}
         .container {{ background: white; border-radius: 16px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); max-width: 420px; width: 100%; text-align: center; padding: 50px 30px; }}
@@ -136,13 +150,6 @@ async def request_magic_link(
     db: Annotated[AsyncSession, Depends(get_db_session)],
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> HTMLResponse:
-    try:
-        magic_link_limiter.check_rate_limit(request)
-    except HTTPException as e:
-        form_data = await request.form()
-        line_user_id = str(form_data.get("line_user_id", "")).strip()
-        return HTMLResponse(content=get_login_html(line_user_id, error=e.detail), status_code=e.status_code)
-    
     form_data = await request.form()
     email = str(form_data.get("email", "")).strip().lower()
     line_user_id = str(form_data.get("line_user_id", "")).strip()
@@ -217,7 +224,7 @@ async def api_verify_token(
 @router.get("/stats")
 async def get_user_stats(db: Annotated[AsyncSession, Depends(get_db_session)]) -> dict:
     from sqlalchemy import func, select
-    from modules.chatbot.models import User
+    from core.models import User
     
     total_result = await db.execute(select(func.count(User.id)))
     total = total_result.scalar() or 0

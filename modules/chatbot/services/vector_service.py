@@ -61,13 +61,14 @@ class VectorService:
 
     def __init__(self, settings: ChatbotSettings | None = None) -> None:
         self._settings = settings or get_chatbot_settings()
-        
+
         # Load global vector config
         config_loader = ConfigLoader()
         config_loader.load()
         self._vector_config = config_loader.get("vector", {})
-        
-        self._model_name = self._vector_config.get("model_name", "paraphrase-multilingual-MiniLM-L12-v2")
+
+        self._model_name = self._vector_config.get(
+            "model_name", "paraphrase-multilingual-MiniLM-L12-v2")
         self._model: SentenceTransformer | None = None
 
     def _get_model(self) -> SentenceTransformer:
@@ -104,6 +105,45 @@ class VectorService:
             logger.error(f"Failed to generate embeddings: {e}")
             raise EmbeddingError(f"Failed to generate embeddings: {e}") from e
 
+    @staticmethod
+    def _preprocess_query(query: str) -> str:
+        """
+        Preprocess query to handle repeated text patterns.
+
+        Detects if the query contains repeated substrings and extracts
+        the base pattern. For example:
+        - "怎麼綁定創時登入驗證怎麼綁定創時登入驗證" -> "怎麼綁定創時登入驗證"
+        """
+        query = query.strip()
+        if not query:
+            return query
+
+        length = len(query)
+
+        # Check for repeated patterns from half length down to 3 characters
+        for pattern_len in range(length // 2, 2, -1):
+            if length % pattern_len == 0:
+                pattern = query[:pattern_len]
+                repetitions = length // pattern_len
+                if pattern * repetitions == query:
+                    logger.info(
+                        f"Detected repeated query: '{query}' -> '{pattern}'")
+                    return pattern
+
+        # Check for partial repetition (e.g., "ABCABC" where length is not exact multiple)
+        for pattern_len in range(length // 2, 2, -1):
+            pattern = query[:pattern_len]
+            # Check if the rest of the string starts with the same pattern
+            if query[pattern_len:].startswith(pattern):
+                # Verify the entire string is made of this pattern (possibly truncated at end)
+                reconstructed = pattern * (length // pattern_len + 1)
+                if reconstructed[:length] == query:
+                    logger.info(
+                        f"Detected partial repeated query: '{query}' -> '{pattern}'")
+                    return pattern
+
+        return query
+
     async def search(
         self,
         query: str,
@@ -114,13 +154,18 @@ class VectorService:
     ) -> SearchResponse:
         start_time = time.time()
 
-        top_k = top_k or int(self._vector_config.get("top_k", 3))
-        similarity_threshold = similarity_threshold or float(self._vector_config.get("similarity_threshold", 0.3))
+        # Preprocess query to handle repeated text
+        processed_query = self._preprocess_query(query)
 
-        logger.info(f"Searching: '{query}' (top_k={top_k}, threshold={similarity_threshold})")
+        top_k = top_k or int(self._vector_config.get("top_k", 3))
+        similarity_threshold = similarity_threshold or float(
+            self._vector_config.get("similarity_threshold", 0.3))
+
+        logger.info(
+            f"Searching: '{processed_query}' (top_k={top_k}, threshold={similarity_threshold})")
 
         try:
-            query_embedding = self.generate_embedding(query)
+            query_embedding = self.generate_embedding(processed_query)
             results = await self._execute_vector_search(
                 db=db,
                 query_embedding=query_embedding,
@@ -239,7 +284,8 @@ class VectorService:
         db: AsyncSession,
     ) -> None:
         text_to_embed = f"{document.title}\n\n{document.content}"
-        logger.info(f"Indexing: {document.title[:50]}... (length={len(text_to_embed)})")
+        logger.info(
+            f"Indexing: {document.title[:50]}... (length={len(text_to_embed)})")
         embedding = self.generate_embedding(text_to_embed)
         document.embedding = embedding
 
@@ -253,11 +299,13 @@ class VectorService:
         tags: list[str] | None = None,
         is_published: bool = True,
     ) -> UpsertResult:
-        logger.info(f"Upserting: record_id={ragic_record_id}, title={title[:50]}...")
+        logger.info(
+            f"Upserting: record_id={ragic_record_id}, title={title[:50]}...")
 
         result = await db.execute(
             select(SOPDocument).where(
-                SOPDocument.metadata_["ragic_record_id"].astext == ragic_record_id
+                SOPDocument.metadata_[
+                    "ragic_record_id"].astext == ragic_record_id
             )
         )
         existing_doc = result.scalar_one_or_none()
@@ -276,7 +324,8 @@ class VectorService:
 
             existing_metadata = existing_doc.metadata_ or {}
             existing_metadata["ragic_record_id"] = ragic_record_id
-            existing_metadata["last_synced_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            existing_metadata["last_synced_at"] = time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             existing_doc.metadata_ = existing_metadata
 
             if content_changed or existing_doc.embedding is None:

@@ -23,14 +23,12 @@ class TestChatbotModuleImports:
     
     def test_import_security(self):
         """Test importing security module."""
-        from modules.chatbot.core.security import (
-            MagicLinkPayload,
-            TokenError,
+        from core.services import (
             TokenExpiredError,
             TokenInvalidError,
         )
-        assert MagicLinkPayload is not None
-        assert TokenError is not None
+        from core.schemas.auth import MagicLinkRequest
+        assert TokenExpiredError is not None
     
     def test_import_models(self):
         """Test importing models."""
@@ -53,10 +51,12 @@ class TestChatbotModuleImports:
     
     def test_import_services(self):
         """Test importing services."""
-        from modules.chatbot.services import (
+        from core.services import (
             AuthService,
-            VectorService,
             RagicService,
+        )
+        from modules.chatbot.services import (
+            VectorService,
             JsonImportService,
             LineService,
         )
@@ -65,7 +65,9 @@ class TestChatbotModuleImports:
     
     def test_import_routers(self):
         """Test importing routers."""
-        from modules.chatbot.routers import auth_router, bot_router, sop_router
+        from modules.chatbot.routers import bot_router, sop_router
+        # auth_router is now in core
+        from core.api import auth_router
         assert auth_router is not None
         assert bot_router is not None
         assert sop_router is not None
@@ -110,7 +112,7 @@ class TestSchemaValidation:
     
     def test_magic_link_request_normalizes_email(self):
         """Test email is normalized to lowercase."""
-        from modules.chatbot.schemas import MagicLinkRequest
+        from core.schemas.auth import MagicLinkRequest
         
         request = MagicLinkRequest(
             email="Test.User@Example.COM",
@@ -177,17 +179,21 @@ class TestRagicServiceFuzzyMatch:
     
     def test_fuzzy_match_exact(self):
         """Test exact string match."""
-        from modules.chatbot.services.ragic_service import RagicService
+        # Patching core.services.ragic.ConfigLoader instead of settings
+        # Because the new RagicService uses ConfigLoader directly
+        pass
         
-        with patch('modules.chatbot.services.ragic_service.get_chatbot_settings') as mock_settings:
-            mock_settings_instance = MagicMock()
-            mock_settings_instance.ragic_field_email = "1000381"
-            mock_settings_instance.ragic_field_name = "1000376"
-            mock_settings_instance.ragic_field_door_access_id = "1000375"
-            mock_settings_instance.ragic_api_base_url = "https://test.ragic.com"
-            mock_settings_instance.ragic_api_key.get_secret_value.return_value = "key"
-            mock_settings_instance.ragic_employee_sheet_path = "/test"
-            mock_settings.return_value = mock_settings_instance
+    def test_fuzzy_match_implementation(self):
+        """Test exact string match."""
+        from core.services.ragic import RagicService
+        
+        # We can test the static method directly or mock ConfigLoader
+        # Here we just assume default config is fine for unit test if we mock nothing
+        # But wait, RagicService __init__ loads config. 
+        
+        with patch('core.services.ragic.ConfigLoader') as MockConfigLoader:
+            mock_loader = MockConfigLoader.return_value
+            mock_loader.get.return_value = {} # Default config
             
             service = RagicService()
             

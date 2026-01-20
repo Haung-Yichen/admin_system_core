@@ -1,11 +1,14 @@
 """
-Chatbot Database Package.
+Chatbot Database Package (Legacy Re-exports).
 
-Contains database base models and session management.
+This package now re-exports from core.database for backward compatibility.
+New code should import directly from core.database.
 """
 
-from modules.chatbot.db.base import Base, TimestampMixin, UUIDPrimaryKey
-from modules.chatbot.db.session import (
+from core.database import (
+    Base,
+    TimestampMixin,
+    UUIDPrimaryKey,
     DBSession,
     close_db_connections,
     get_db_session,

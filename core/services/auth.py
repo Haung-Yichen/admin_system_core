@@ -1,7 +1,8 @@
 """
-Authentication Service Module.
+Core Authentication Service.
 
-Handles Magic Link authentication flow.
+Handles Magic Link authentication flow for user identity verification.
+This is a framework-level service used by all modules requiring user authentication.
 """
 
 import hashlib
@@ -14,18 +15,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.app_context import ConfigLoader
-from modules.chatbot.core.config import ChatbotSettings, get_chatbot_settings
-from modules.chatbot.core.security import (
-    TokenExpiredError,
-    TokenInvalidError,
-    create_magic_link_token,
-    decode_magic_link_token,
-)
-from modules.chatbot.models import User
-from modules.chatbot.models.models import UsedToken
-from modules.chatbot.schemas import RagicEmployeeData, UserResponse
-from modules.chatbot.services.ragic_service import RagicService, get_ragic_service
-
+from core.models import User, UsedToken
+from core.schemas.auth import RagicEmployeeData, UserResponse
+from core.security import generate_blind_index
+from core.services.ragic import RagicService, get_ragic_service
 
 logger = logging.getLogger(__name__)
 
@@ -55,15 +48,23 @@ class TokenAlreadyUsedError(AuthError):
     pass
 
 
+class TokenExpiredError(AuthError):
+    """Raised when magic link token has expired."""
+    pass
+
+
+class TokenInvalidError(AuthError):
+    """Raised when magic link token is invalid."""
+    pass
+
+
 class AuthService:
     """Service for handling Magic Link authentication flow."""
     
     def __init__(
         self,
-        settings: ChatbotSettings | None = None,
         ragic_service: RagicService | None = None,
     ) -> None:
-        self._settings = settings or get_chatbot_settings()
         self._ragic_service = ragic_service or get_ragic_service()
         
         # Load global config
@@ -71,6 +72,7 @@ class AuthService:
         self._config_loader.load()
         self._security_config = self._config_loader.get("security", {})
         self._email_config = self._config_loader.get("email", {})
+        self._app_name = self._config_loader.get("server.app_name", "Admin System")
     
     async def initiate_magic_link(
         self,
@@ -102,6 +104,8 @@ class AuthService:
         return f"Verification email sent to {email}"
     
     def generate_magic_link(self, email: str, line_user_id: str) -> str:
+        from core.services.auth_token import create_magic_link_token
+        
         token = create_magic_link_token(email, line_user_id)
         base_url = self._config_loader.get("server.base_url", "")
         return f"{base_url}/auth/verify?token={token}"
@@ -111,6 +115,10 @@ class AuthService:
         token: str,
         db: AsyncSession,
     ) -> UserResponse:
+        from core.services.auth_token import decode_magic_link_token
+        from core.services.auth_token import TokenExpiredError as JwtExpiredError
+        from core.services.auth_token import TokenInvalidError as JwtInvalidError
+        
         logger.info("Verifying magic link token")
         
         token_hash = hashlib.sha256(token.encode()).hexdigest()
@@ -152,7 +160,11 @@ class AuthService:
             logger.info(f"User binding successful: {user.email} <-> {user.line_user_id}")
             return UserResponse.model_validate(user)
             
-        except (TokenExpiredError, TokenInvalidError, TokenAlreadyUsedError):
+        except JwtExpiredError:
+            raise TokenExpiredError("Magic link has expired")
+        except JwtInvalidError as e:
+            raise TokenInvalidError(str(e))
+        except TokenAlreadyUsedError:
             raise
         except Exception as e:
             logger.error(f"User binding failed: {e}")
@@ -161,9 +173,13 @@ class AuthService:
     async def _find_existing_user(
         self, db: AsyncSession, email: str, line_user_id: str
     ) -> User | None:
+        """Find user by email or line_user_id using blind index hashes."""
+        email_hash = generate_blind_index(email)
+        line_user_id_hash = generate_blind_index(line_user_id)
+        
         result = await db.execute(
             select(User).where(
-                (User.email == email) | (User.line_user_id == line_user_id)
+                (User.email_hash == email_hash) | (User.line_user_id_hash == line_user_id_hash)
             )
         )
         return result.scalar_one_or_none()
@@ -171,11 +187,14 @@ class AuthService:
     async def _create_bound_user(
         self, db: AsyncSession, email: str, line_user_id: str
     ) -> User:
+        """Create new user with encrypted fields and blind indexes."""
         employee = await self._ragic_service.verify_email_exists(email)
         
         user = User(
             email=email,
+            email_hash=generate_blind_index(email),
             line_user_id=line_user_id,
+            line_user_id_hash=generate_blind_index(line_user_id),
             ragic_employee_id=employee.employee_id if employee else None,
             display_name=employee.name if employee else None,
             is_active=True,
@@ -188,8 +207,11 @@ class AuthService:
     async def _update_user_binding(
         self, db: AsyncSession, user: User, email: str, line_user_id: str
     ) -> User:
+        """Update user binding with encrypted fields and blind indexes."""
         user.email = email
+        user.email_hash = generate_blind_index(email)
         user.line_user_id = line_user_id
+        user.line_user_id_hash = generate_blind_index(line_user_id)
         user.is_active = True
         user.last_login_at = datetime.now(timezone.utc)
         logger.info(f"Updated user binding: {email} <-> {line_user_id}")
@@ -211,14 +233,14 @@ class AuthService:
         
         try:
             msg = MIMEMultipart("alternative")
-            msg["Subject"] = f"🔐 {self._settings.app_name} - Verify Your Identity"
+            msg["Subject"] = f"🔐 {self._app_name} - Verify Your Identity"
             msg["From"] = f"{smtp_from_name} <{smtp_from_email}>"
             msg["To"] = to_email
             
             text_content = f"""
 Hello {employee_name},
 
-You requested to link your LINE account with {self._settings.app_name}.
+You requested to link your LINE account with {self._app_name}.
 
 Click the link below to verify your identity:
 {magic_link}
@@ -228,7 +250,7 @@ This link will expire in {expire_minutes} minutes.
 If you did not request this, please ignore this email.
 
 Best regards,
-{self._settings.app_name} Team
+{self._app_name} Team
 """.strip()
             
             html_content = f"""
@@ -237,7 +259,7 @@ Best regards,
 <head><meta charset="UTF-8"></head>
 <body style="font-family: sans-serif;">
     <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-        <h2 style="color: #00B900;">🔐 {self._settings.app_name}</h2>
+        <h2 style="color: #00B900;">🔐 {self._app_name}</h2>
         <p>Hello <strong>{employee_name}</strong>,</p>
         <p>You requested to link your LINE account.</p>
         <p><a href="{magic_link}" style="background: #00B900; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">✅ Verify My Identity</a></p>
@@ -267,8 +289,10 @@ Best regards,
             raise EmailSendError(f"Failed to send email: {e}") from e
     
     async def get_user_by_line_id(self, line_user_id: str, db: AsyncSession) -> User | None:
+        """Get user by LINE ID using blind index hash."""
+        line_user_id_hash = generate_blind_index(line_user_id)
         result = await db.execute(
-            select(User).where(User.line_user_id == line_user_id, User.is_active == True)
+            select(User).where(User.line_user_id_hash == line_user_id_hash, User.is_active == True)
         )
         return result.scalar_one_or_none()
     

@@ -1,31 +1,26 @@
 """
-LINE Bot Webhook Router.
+LINE Bot Flex Message Templates.
 
-Handles LINE webhook events and message routing.
+This module provides Flex Message templates for LINE Bot responses.
+The actual webhook handling is now done by the framework at /webhook/line/{module_name}.
+
+Note: The webhook endpoint has been moved to the framework layer (core/server.py).
+      This file now only contains reusable message templates.
 """
 
-import logging
-from typing import Annotated, Any
-
-from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from modules.chatbot.core.config import get_chatbot_settings
-from modules.chatbot.db import get_db_session
-from modules.chatbot.services import (
-    AuthService,
-    VectorService,
-    get_auth_service,
-    get_line_service,
-    get_vector_service,
-)
-
-
-logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/bot", tags=["LINE Bot"])
+from typing import Any
 
 
 def create_auth_required_flex(line_user_id: str) -> dict[str, Any]:
+    """
+    Create a Flex Message bubble prompting user to authenticate.
+    
+    Args:
+        line_user_id: LINE user ID for constructing the login URL.
+        
+    Returns:
+        Flex Message bubble content.
+    """
     from core.app_context import ConfigLoader
     config_loader = ConfigLoader()
     config_loader.load()
@@ -47,7 +42,24 @@ def create_auth_required_flex(line_user_id: str) -> dict[str, Any]:
     }
 
 
-def create_sop_result_flex(title: str, content: str, similarity: float, category: str | None = None) -> dict[str, Any]:
+def create_sop_result_flex(
+    title: str,
+    content: str,
+    similarity: float,
+    category: str | None = None,
+) -> dict[str, Any]:
+    """
+    Create a Flex Message bubble displaying SOP search result.
+    
+    Args:
+        title: SOP document title.
+        content: SOP document content.
+        similarity: Search similarity score (0.0 - 1.0).
+        category: Optional document category.
+        
+    Returns:
+        Flex Message bubble content.
+    """
     max_len = 500
     display_content = content[:max_len] + "..." if len(content) > max_len else content
     match_percent = round(similarity * 100)
@@ -75,6 +87,15 @@ def create_sop_result_flex(title: str, content: str, similarity: float, category
 
 
 def create_no_result_flex(query: str) -> dict[str, Any]:
+    """
+    Create a Flex Message bubble when no SOP results are found.
+    
+    Args:
+        query: The user's search query.
+        
+    Returns:
+        Flex Message bubble content.
+    """
     return {
         "type": "bubble",
         "body": {"type": "box", "layout": "vertical", "contents": [
@@ -87,113 +108,13 @@ def create_no_result_flex(query: str) -> dict[str, Any]:
     }
 
 
-@router.post("/webhook")
-async def line_webhook(
-    request: Request,
-    x_line_signature: Annotated[str, Header()],
-    db: Annotated[AsyncSession, Depends(get_db_session)],
-    auth_service: Annotated[AuthService, Depends(get_auth_service)],
-    vector_service: Annotated[VectorService, Depends(get_vector_service)],
-) -> dict[str, str]:
-    """Handle LINE webhook events."""
-    body = await request.body()
-    
-    line_service = get_line_service()
-    if not line_service.verify_signature(body, x_line_signature):
-        logger.warning("Invalid LINE webhook signature")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid signature")
-    
-    body_json = await request.json()
-    events = body_json.get("events", [])
-    
-    for event_data in events:
-        try:
-            await process_event(event_data, db, auth_service, vector_service)
-        except Exception as e:
-            logger.error(f"Error processing event: {e}")
-    
-    return {"status": "ok"}
-
-
-async def process_event(
-    event_data: dict[str, Any],
-    db: AsyncSession,
-    auth_service: AuthService,
-    vector_service: VectorService,
-) -> None:
-    event_type = event_data.get("type")
-    reply_token = event_data.get("replyToken")
-    source = event_data.get("source", {})
-    user_id = source.get("userId")
-    
-    if not user_id:
-        return
-    
-    logger.info(f"Processing event: {event_type} from user: {user_id}")
-    
-    if event_type == "follow":
-        await handle_follow_event(user_id, reply_token, db, auth_service)
-        return
-    
-    if event_type == "message":
-        message_data = event_data.get("message", {})
-        if message_data.get("type") == "text":
-            text = message_data.get("text", "").strip()
-            await handle_text_message(user_id, text, reply_token, db, auth_service, vector_service)
-
-
-async def handle_follow_event(
-    user_id: str,
-    reply_token: str | None,
-    db: AsyncSession,
-    auth_service: AuthService,
-) -> None:
-    if not reply_token:
-        return
-    
-    line_service = get_line_service()
-    is_auth = await auth_service.is_user_authenticated(user_id, db)
-    
-    if is_auth:
-        await line_service.reply(reply_token, [{"type": "text", "text": "👋 歡迎回來！您可以直接輸入問題查詢 SOP。"}])
-    else:
-        flex_content = create_auth_required_flex(user_id)
-        await line_service.reply(reply_token, [
-            {"type": "text", "text": "👋 歡迎使用 HSIB SOP Bot！"},
-            {"type": "flex", "altText": "請驗證您的身份", "contents": flex_content}
-        ])
-
-
-async def handle_text_message(
-    user_id: str,
-    text: str,
-    reply_token: str | None,
-    db: AsyncSession,
-    auth_service: AuthService,
-    vector_service: VectorService,
-) -> None:
-    if not reply_token:
-        return
-    
-    line_service = get_line_service()
-    is_auth = await auth_service.is_user_authenticated(user_id, db)
-    
-    if not is_auth:
-        flex_content = create_auth_required_flex(user_id)
-        await line_service.reply(reply_token, [{"type": "flex", "altText": "請先驗證身份", "contents": flex_content}])
-        return
-    
-    try:
-        result = await vector_service.get_best_match(text, db)
-        
-        if result:
-            doc, similarity = result
-            flex_content = create_sop_result_flex(doc.title, doc.content, similarity, doc.category)
-            await line_service.reply(reply_token, [{"type": "flex", "altText": f"SOP: {doc.title}", "contents": flex_content}])
-        else:
-            flex_content = create_no_result_flex(text)
-            await line_service.reply(reply_token, [{"type": "flex", "altText": "找不到相關 SOP", "contents": flex_content}])
-            
-    except Exception as e:
-        logger.error(f"Search error: {e}")
-        await line_service.reply(reply_token, [{"type": "text", "text": "⚠️ 搜尋時發生錯誤，請稍後再試。"}])
+# =============================================================================
+# DEPRECATED: The following code has been moved to the framework layer.
+# =============================================================================
+# The LINE webhook endpoint is now handled by:
+#   - core/server.py: /webhook/line/{module_name}
+#   - modules/chatbot/chatbot_module.py: handle_line_event()
+#
+# This allows the framework to handle signature verification and event
+# dispatching, while modules focus on business logic only.
+# =============================================================================

@@ -27,8 +27,9 @@ pytestmark = pytest.mark.asyncio
 def reset_db_session_state():
     """Reset the global DB session state before each test to avoid stale connections."""
     # Reset before test
-    import modules.chatbot.db.session as session_module
-    session_module._engine = None
+    import core.database.engine as engine_module
+    import core.database.session as session_module
+    engine_module._engine = None
     session_module._async_session_factory = None
     yield
     # Optional: cleanup after test (not strictly necessary for tests)
@@ -40,7 +41,7 @@ class TestDatabaseConnectivity:
     @pytest.mark.asyncio
     async def test_database_connection(self):
         """DB-01: Verify database connection works."""
-        from modules.chatbot.db.session import get_standalone_session
+        from core.database import get_standalone_session
         from sqlalchemy import text
 
         async with get_standalone_session() as session:
@@ -54,7 +55,7 @@ class TestDatabaseConnectivity:
     @pytest.mark.asyncio
     async def test_database_can_read_tables(self):
         """DB-02: Verify SOP documents table is readable."""
-        from modules.chatbot.db.session import get_standalone_session
+        from core.database import get_standalone_session
         from modules.chatbot.models import SOPDocument
         from sqlalchemy import select, func
 
@@ -70,7 +71,7 @@ class TestDatabaseConnectivity:
     @pytest.mark.asyncio
     async def test_database_can_read_users(self):
         """DB-03: Verify users table is readable."""
-        from modules.chatbot.db.session import get_standalone_session
+        from core.database import get_standalone_session
         from modules.chatbot.models import User
         from sqlalchemy import select, func
 
@@ -90,7 +91,7 @@ class TestRagicAPIConnectivity:
         RAGIC-01: Verify Ragic API can read /HSIBAdmSys/-3/4 employee sheet.
         Expects: 150+ employee records.
         """
-        from modules.chatbot.services.ragic_service import get_ragic_service
+        from core.services.ragic import get_ragic_service
 
         service = get_ragic_service()
         employees = await service.get_all_employees()
@@ -114,7 +115,7 @@ class TestRagicAPIConnectivity:
     @pytest.mark.asyncio
     async def test_ragic_field_parsing(self):
         """RAGIC-02: Verify Ragic field parsing (email, name, door_access_id)."""
-        from modules.chatbot.services.ragic_service import get_ragic_service
+        from core.services.ragic import get_ragic_service
 
         service = get_ragic_service()
         employees = await service.get_all_employees()
@@ -226,7 +227,7 @@ class TestVectorSearchFunctionality:
     async def test_vector_search(self):
         """VECTOR-03: Verify vector search works (requires DB with SOP docs)."""
         from modules.chatbot.services.vector_service import get_vector_service
-        from modules.chatbot.db.session import get_standalone_session
+        from core.database import get_standalone_session
 
         service = get_vector_service()
 
@@ -258,12 +259,12 @@ class TestEndToEndIntegration:
     @pytest.mark.asyncio
     async def test_full_service_stack(self):
         """E2E-01: Integration test - verify all services work together."""
+        from core.services import RagicService
         from modules.chatbot.services import (
-            RagicService,
             LineService,
             VectorService,
         )
-        from modules.chatbot.db.session import get_standalone_session
+        from core.database import get_standalone_session
 
         print("")
         print("[INFO] Full Service Stack Test:")

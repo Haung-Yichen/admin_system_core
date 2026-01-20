@@ -47,9 +47,9 @@ class AdminSystemApp:
         self._router = EventRouter(self._registry, self._context)
         self._webhook_dispatcher = WebhookDispatcher(self._router, self._context)
         
-        # Server
+        # Server (注入 registry 以支援動態 LINE webhook 路由)
         port = self._context.config.get("server.port", 8000)
-        self._server = FastAPIServer(self._context, port=port)
+        self._server = FastAPIServer(self._context, port=port, registry=self._registry)
         self._server.set_webhook_handler(self._handle_webhook)
         
         # Register module API routers
@@ -124,8 +124,17 @@ class AdminSystemApp:
         self._context.log_event("Shutting down...", "INFO")
         self._server.stop()
         self._registry.shutdown_all()
-        self._tray.hide()
+    # Windows-specific: Add slight delay or dummy async call to let ProactorLoop finish
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.stop()
+        except Exception:
+            pass
+            
         self._app.quit()
+
     
     def run(self) -> int:
         """Run the application."""

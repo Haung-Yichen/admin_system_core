@@ -252,3 +252,40 @@ class StatBox(QWidget):
         if color:
             self.color = color
             self.lbl_value.setStyleSheet(f"color: {self.color};")
+
+
+class LargeStatBox(QWidget):
+    """Extra large stat display for prominent metrics."""
+    
+    def __init__(self, label: str, value: str = "0", color: str = None, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet(f"""
+            background-color: {THEME['surface_1']};
+            border: 1px solid {THEME['surface_2']};
+            border-radius: 6px;
+        """)
+        self.color = color or THEME['cpu']
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(4)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.lbl_value = QLabel(str(value))
+        self.lbl_value.setFont(QFont(FONT_FAMILY_MONO, 28, QFont.Weight.Bold))
+        self.lbl_value.setStyleSheet(f"color: {self.color}; background: transparent; border: none;")
+        self.lbl_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.lbl_value)
+        
+        self.lbl_name = QLabel(label.upper())
+        self.lbl_name.setFont(QFont(FONT_FAMILY_MONO, 10))
+        self.lbl_name.setStyleSheet(f"color: {THEME['text_sub']}; background: transparent; border: none;")
+        self.lbl_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.lbl_name)
+    
+    def set_value(self, value: str, color: str = None) -> None:
+        self.lbl_value.setText(str(value))
+        if color:
+            self.color = color
+            self.lbl_value.setStyleSheet(f"color: {self.color}; background: transparent; border: none;")
+

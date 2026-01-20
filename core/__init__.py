@@ -5,11 +5,13 @@ from core.logging_config import setup_logging
 from core.registry import ModuleRegistry, ModuleLoader
 from core.router import EventRouter, WebhookDispatcher
 from core.server import FastAPIServer
+from core import database
 
 __all__ = [
     "AppContext", "ConfigLoader", "IAppModule",
     "ModuleRegistry", "ModuleLoader",
     "EventRouter", "WebhookDispatcher", "FastAPIServer",
-    "setup_logging"
+    "setup_logging", "database"
 ]
+
 

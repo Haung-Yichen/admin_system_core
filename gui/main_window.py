@@ -1,13 +1,14 @@
 """
 Main Window - btop-style Dashboard UI.
 Industrial-themed monitoring dashboard with gauges, LEDs, and metrics.
+Dynamically renders module status cards.
 """
 import datetime
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, Dict, Any, TYPE_CHECKING
 from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QTextEdit, QFrame, QGridLayout, QPushButton
+    QTextEdit, QFrame, QGridLayout, QPushButton, QScrollArea
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QCloseEvent, QIcon
@@ -15,7 +16,7 @@ import psutil
 
 from gui.theme import THEME, FONT_FAMILY_MONO, STYLES
 from gui.components import (
-    IndustrialGauge, LEDIndicator, BtopCard, MetricRow, StatBox
+    IndustrialGauge, LEDIndicator, BtopCard, MetricRow, StatBox, LargeStatBox
 )
 
 if TYPE_CHECKING:
@@ -25,6 +26,12 @@ if TYPE_CHECKING:
 
 # Path to resources directory
 RESOURCES_DIR = Path(__file__).parent.parent / "resources"
+
+# Color palette for dynamic cards
+MODULE_COLORS = [
+    THEME['cpu'], THEME['mem'], THEME['net'], THEME['proc'],
+    THEME['success'], THEME['warning']
+]
 
 
 class DashboardWidget(QWidget):
@@ -40,6 +47,11 @@ class DashboardWidget(QWidget):
         self._context = context
         self._registry = registry
         self.start_time = datetime.datetime.now()
+        
+        # Dynamic module widget references: {module_name: {key: widget}}
+        self._module_widgets: Dict[str, Dict[str, Any]] = {}
+        self._module_cards: Dict[str, BtopCard] = {}
+        
         self._setup_ui()
         self._start_updates()
     
@@ -49,17 +61,16 @@ class DashboardWidget(QWidget):
         main_layout.setSpacing(10)
         
         # ========================================
-        # TOP SECTION: 3 Columns
+        # TOP SECTION: 2 Columns
         # Column 1: System Gauges & Service Status
-        # Column 2: Module/Chatbot Monitor
-        # Column 3: Quick Stats & Server Metrics
+        # Column 2: Dynamic Module Cards (scrollable)
         # ========================================
         top_section = QWidget()
         top_layout = QHBoxLayout(top_section)
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.setSpacing(10)
         
-        # -- COLUMN 1: System Health --
+        # -- COLUMN 1: System Health (fixed width) --
         col1 = QVBoxLayout()
         col1.setSpacing(10)
         
@@ -76,7 +87,7 @@ class DashboardWidget(QWidget):
         gauge_grid.addWidget(self.gauge_disk, 1, 0)
         gauge_grid.addWidget(self.gauge_net, 1, 1)
         self.card_gauges.add_layout(gauge_grid)
-        col1.addWidget(self.card_gauges, 2)  # Stretch factor 2 (larger)
+        col1.addWidget(self.card_gauges, 2)
         
         # Service Status
         self.card_status = BtopCard("SERVICE STATUS")
@@ -91,43 +102,10 @@ class DashboardWidget(QWidget):
         led_grid.addWidget(self.led_db, 0, 2)
         led_grid.addWidget(self.led_modules, 0, 3)
         self.card_status.add_layout(led_grid)
-        col1.addWidget(self.card_status, 1)  # Stretch factor 1
-        
-        top_layout.addLayout(col1, 1)
-        
-        # -- COLUMN 2: Chatbot / Module Monitor --
-        col2 = QVBoxLayout()
-        col2.setSpacing(10)
-        
-        self.card_chatbot = BtopCard("CHATBOT STATUS")
-        
-        # Row 1: Quick Stats (StatBox)
-        cb_stats = QHBoxLayout()
-        cb_stats.setSpacing(5)
-        self.box_sop = StatBox("SOP Docs", "0", THEME['cpu'])
-        self.box_users = StatBox("Users", "0", THEME['mem'])
-        cb_stats.addWidget(self.box_sop)
-        cb_stats.addWidget(self.box_users)
-        self.card_chatbot.add_layout(cb_stats)
-        
-        # Row 2: Details (MetricRow)
-        self.stat_vector_model = MetricRow("Model", "Loading...", THEME['net'])
-        self.stat_model_status = MetricRow("Status", "Init...", THEME['warning'])
-        self.stat_device = MetricRow("Device", "Checking...", THEME['cpu'])
-        
-        self.card_chatbot.add_widget(self.stat_vector_model)
-        self.card_chatbot.add_widget(self.stat_model_status)
-        self.card_chatbot.add_widget(self.stat_device)
-        
-        col2.addWidget(self.card_chatbot, 1)  # Stretch factor 1 (fills full height)
-        top_layout.addLayout(col2, 1)
-        
-        # -- COLUMN 3: General Stats --
-        col3 = QVBoxLayout()
-        col3.setSpacing(10)
+        col1.addWidget(self.card_status, 1)
         
         # Quick Stats
-        self.card_stats = BtopCard("QUICK STATS")
+        self.card_stats = BtopCard("FRAMEWORK")
         self.stat_modules = StatBox("Modules", "0", THEME['cpu'])
         self.stat_uptime = StatBox("Uptime", "0s", THEME['mem'])
         self.stat_events = StatBox("Events", "0", THEME['net'])
@@ -138,27 +116,37 @@ class DashboardWidget(QWidget):
         stats_row.addWidget(self.stat_uptime)
         stats_row.addWidget(self.stat_events)
         self.card_stats.add_layout(stats_row)
-        col3.addWidget(self.card_stats, 1)  # Stretch factor 1
-        
-        # Server Metrics
-        self.card_api = BtopCard("SERVER METRICS")
-        
-        # Row 1: StatBoxes
-        srv_stats = QHBoxLayout()
-        srv_stats.setSpacing(5)
-        self.box_port = StatBox("Port", "8000", THEME['cpu'])
-        self.box_cpu = StatBox("Proc CPU", "0%", THEME['mem'])
-        srv_stats.addWidget(self.box_port)
-        srv_stats.addWidget(self.box_cpu)
-        self.card_api.add_layout(srv_stats)
-        
-        # Row 2: Status
-        self.metric_status = MetricRow("Server Status", "Running", THEME['success'])
-        self.card_api.add_widget(self.metric_status)
+        col1.addWidget(self.card_stats, 1)
 
-        col3.addWidget(self.card_api, 1)  # Stretch factor 1
+        top_layout.addLayout(col1, 1)
         
-        top_layout.addLayout(col3, 1)
+        # -- COLUMN 2: Dynamic Module Cards (scrollable area) --
+        self.modules_scroll = QScrollArea()
+        self.modules_scroll.setWidgetResizable(True)
+        self.modules_scroll.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background-color: transparent;
+            }}
+            QScrollBar:vertical {{
+                background: {THEME['surface_0']};
+                width: 8px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {THEME['surface_2']};
+                border-radius: 4px;
+            }}
+        """)
+        
+        self.modules_container = QWidget()
+        self.modules_layout = QVBoxLayout(self.modules_container)
+        self.modules_layout.setContentsMargins(0, 0, 5, 0)
+        self.modules_layout.setSpacing(10)
+        self.modules_layout.addStretch()  # Push cards to top
+        
+        self.modules_scroll.setWidget(self.modules_container)
+        top_layout.addWidget(self.modules_scroll, 2)  # Give modules more space
         
         main_layout.addWidget(top_section)
         
@@ -198,7 +186,7 @@ class DashboardWidget(QWidget):
         self.console.setStyleSheet(STYLES["log"])
         self.card_log.add_widget(self.console)
         
-        main_layout.addWidget(self.card_log, 1)  # Stretch to fill remaining space
+        main_layout.addWidget(self.card_log, 1)
     
     def _clear_logs(self) -> None:
         self.console.clear()
@@ -211,6 +199,113 @@ class DashboardWidget(QWidget):
         self._timer.timeout.connect(self._update_stats)
         self._timer.start(1000)
     
+    def _render_module_card(self, module_name: str, status: Dict[str, Any], color_index: int) -> BtopCard:
+        """
+        Dynamically render a card with smart layout.
+        Prioritizes numeric metrics in a grid, shows text details in a list.
+        """
+        card = BtopCard(module_name.upper())
+        details = status.get("details", {})
+        widgets: Dict[str, Any] = {}
+        
+        # Split details into 'metrics' (numeric) and 'info' (text)
+        metrics = {}
+        info = {}
+        
+        for k, v in details.items():
+            val_str = str(v)
+            # Simple heuristic: if it looks like a number, it's a metric
+            # Remove commads, %, s, ms etc for check
+            clean_val = val_str.replace(",", "").replace("%", "").replace("s", "").replace("ms", "")
+            if clean_val.replace(".", "").isdigit():
+                metrics[k] = val_str
+            else:
+                info[k] = val_str
+        
+        layout_box = card.content_layout
+        
+        # 1. Render Metrics (Grid or Large Box)
+        if metrics:
+            if len(metrics) <= 2:
+                # Extra prominence for few metrics
+                row = QHBoxLayout()
+                row.setSpacing(10)
+                for i, (key, value) in enumerate(metrics.items()):
+                    item_color = MODULE_COLORS[(color_index + i) % len(MODULE_COLORS)]
+                    box = LargeStatBox(key, str(value), item_color)
+                    row.addWidget(box)
+                    widgets[key] = box
+                layout_box.addLayout(row)
+            else:
+                # Grid for multiple metrics
+                grid = QGridLayout()
+                grid.setSpacing(8)
+                items = list(metrics.items())
+                for i, (key, value) in enumerate(items):
+                    item_color = MODULE_COLORS[(color_index + i) % len(MODULE_COLORS)]
+                    box = StatBox(key, str(value), item_color)
+                    grid.addWidget(box, i // 2, i % 2)
+                    widgets[key] = box
+                layout_box.addLayout(grid)
+            
+            # Divider if we also have info
+            if info:
+                layout_box.addSpacing(8)
+                line = QFrame()
+                line.setFrameShape(QFrame.Shape.HLine)
+                line.setStyleSheet(f"background-color: {THEME['surface_2']}; border: none; max-height: 1px;")
+                layout_box.addWidget(line)
+                layout_box.addSpacing(4)
+
+        # 2. Render Info (List)
+        for i, (key, value) in enumerate(info.items()):
+            # Cycle colors but skip red unless explicit error
+            item_color = MODULE_COLORS[(color_index + i) % 4] # Keep to first 4 colors (safe)
+            row = MetricRow(key, str(value), item_color)
+            card.add_widget(row)
+            widgets[key] = row
+        
+        self._module_widgets[module_name] = widgets
+        return card
+    
+    def _update_module_cards(self) -> None:
+        """Discover modules and create/update their cards dynamically."""
+        modules = self._registry.get_all_modules()
+        
+        for i, module in enumerate(modules):
+            module_name = module.get_module_name()
+            
+            try:
+                status = module.get_status()
+            except Exception:
+                status = {"status": "error", "details": {}}
+            
+            details = status.get("details", {})
+            
+            # Check if card already exists
+            if module_name not in self._module_cards:
+                # Create new card
+                card = self._render_module_card(module_name, status, i)
+                self._module_cards[module_name] = card
+                # Insert before the stretch
+                self.modules_layout.insertWidget(self.modules_layout.count() - 1, card)
+            else:
+                # Update existing widgets
+                widgets = self._module_widgets.get(module_name, {})
+                for key, value in details.items():
+                    if key in widgets:
+                        widget = widgets[key]
+                        # Determine color based on key content
+                        color = None
+                        if key.lower() in ["status", "model status"]:
+                            if str(value).lower() in ["ready", "active", "ok"]:
+                                color = THEME['success']
+                            elif str(value).lower() in ["loading", "init", "initializing"]:
+                                color = THEME['warning']
+                            else:
+                                color = THEME['error']
+                        widget.set_value(str(value), color)
+    
     def _update_stats(self) -> None:
         # Update CPU/Memory gauges
         try:
@@ -221,9 +316,6 @@ class DashboardWidget(QWidget):
             self.gauge_cpu.set_value(cpu)
             self.gauge_mem.set_value(mem)
             self.gauge_disk.set_value(disk)
-            
-            # Update metrics
-            self.box_cpu.set_value(f"{cpu:.1f}%")
         except Exception:
             pass
         
@@ -231,43 +323,16 @@ class DashboardWidget(QWidget):
         running, port = self._context.get_server_status()
         self.led_server.set_status(running)
         self.led_api.set_status(running)
-        self.led_db.set_status(True)  # Assume DB is up if server is running
+        self.led_db.set_status(True)
         
-        if running:
-            self.metric_status.set_value("Running", THEME['success'])
-            self.box_port.set_value(str(port))
-        else:
-            self.metric_status.set_value("Stopped", THEME['error'])
-        
-        # Update modules
+        # Update modules count
         modules = self._registry.get_module_names()
         module_count = len(modules)
         self.stat_modules.set_value(str(module_count))
         self.led_modules.set_status(module_count > 0)
         
-        # --- Update Chatbot Specific Stats ---
-        # Try to find chatbot module and get its status
-        chatbot_module = self._registry.get_module("chatbot")
-        if chatbot_module and hasattr(chatbot_module, "get_status"):
-            status = chatbot_module.get_status()
-            details = status.get("details", {})
-            
-            self.box_sop.set_value(details.get("SOP Documents", "0"))
-            self.box_users.set_value(details.get("LINE Users", "0"))
-            
-            # Update Model Info (MetricRow)
-            # Update Model Info (MetricRow)
-            self.stat_vector_model.set_value(details.get("Embedding Model", "N/A"))
-            self.stat_device.set_value(details.get("Device", "Unknown"))
-            
-            model_status = details.get("Model Status", "Unknown")
-            status_color = THEME['success'] if model_status == "Ready" else THEME['warning']
-            self.stat_model_status.set_value(model_status, status_color)
-        else:
-            self.box_sop.set_value("-")
-            self.box_users.set_value("-")
-            self.stat_model_status.set_value("Not Loaded", THEME['error'])
-            self.stat_device.set_value("N/A", THEME['error'])
+        # Update dynamic module cards
+        self._update_module_cards()
 
         # Update uptime
         delta = datetime.datetime.now() - self.start_time
