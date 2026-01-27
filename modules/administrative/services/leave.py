@@ -211,8 +211,9 @@ class LeaveService:
         # TODO: 暫時跳過身份驗證，使用測試數據
         # 正式上線前請取消註解下方的驗證邏輯
         # =================================================================
-        logger.warning(f"[DEV MODE] Skipping auth for LINE user: {line_user_id}")
-        
+        logger.warning(
+            f"[DEV MODE] Skipping auth for LINE user: {line_user_id}")
+
         # 嘗試從員工快取中查找，如果找不到就返回測試數據
         try:
             # 嘗試用固定測試 email 查找員工
@@ -221,9 +222,10 @@ class LeaveService:
                 select(AdministrativeEmployee).limit(1)
             )
             employee = result.scalar_one_or_none()
-            
+
             if employee:
-                logger.info(f"[DEV MODE] Using employee from cache: {employee.name}")
+                logger.info(
+                    f"[DEV MODE] Using employee from cache: {employee.name}")
                 return {
                     "name": employee.name,
                     "department": employee.department_name or "測試部門",
@@ -231,7 +233,7 @@ class LeaveService:
                 }
         except Exception as e:
             logger.warning(f"[DEV MODE] Failed to fetch employee: {e}")
-        
+
         # 返回測試數據
         logger.info("[DEV MODE] Using mock test data")
         return {
@@ -239,7 +241,7 @@ class LeaveService:
             "department": "測試部門",
             "email": "test@example.com",
         }
-        
+
         # =================================================================
         # 原始驗證邏輯 (暫時註解)
         # =================================================================
@@ -299,8 +301,9 @@ class LeaveService:
         # TODO: 暫時跳過身份驗證，使用測試數據
         # 正式上線前請取消註解下方的驗證邏輯
         # =================================================================
-        logger.warning(f"[DEV MODE] Skipping auth for leave submission, LINE user: {line_user_id}")
-        
+        logger.warning(
+            f"[DEV MODE] Skipping auth for leave submission, LINE user: {line_user_id}")
+
         # 嘗試從快取取得員工資料
         employee = None
         try:
@@ -310,7 +313,7 @@ class LeaveService:
             employee = result.scalar_one_or_none()
         except Exception as e:
             logger.warning(f"[DEV MODE] Failed to fetch employee: {e}")
-        
+
         if not employee:
             # 使用模擬數據
             logger.info("[DEV MODE] Using mock employee data for submission")
@@ -321,10 +324,11 @@ class LeaveService:
                 "employee": "測試使用者",
                 "date": leave_date,
             }
-        
+
         email = employee.email
-        logger.info(f"[DEV MODE] Leave submission using employee: {employee.name}")
-        
+        logger.info(
+            f"[DEV MODE] Leave submission using employee: {employee.name}")
+
         # =================================================================
         # 原始驗證邏輯 (暫時註解)
         # =================================================================

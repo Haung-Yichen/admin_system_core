@@ -7,7 +7,9 @@
     <title>請假申請 - HSIB Admin System</title>
 
     <!-- LIFF SDK - with error handling -->
-    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js" onerror="window.liffLoadError=true;"></script></script>
+    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"
+        onerror="window.liffLoadError=true;"></script>
+    </script>
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -570,7 +572,7 @@
                 await loadUserData(); // This will use the mock backend we enabled
                 return;
             }
-            
+
             try {
                 // Update loading text
                 document.querySelector('.loading-text').textContent = '正在載入設定...';
@@ -839,37 +841,37 @@
         }
 
         // Initialize on load with error handling
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             console.log('[DEBUG] DOMContentLoaded fired');
-            
+
             // Immediately show debug info
             createDebugOverlay();
             debugLog('DOM loaded, starting...');
-            
+
             // Check if LIFF SDK loaded
             if (window.liffLoadError) {
                 debugLog('LIFF SDK failed to load!', true);
                 showError('LIFF SDK 載入失敗，請檢查網路連線');
                 return;
             }
-            
+
             if (typeof liff === 'undefined') {
                 debugLog('LIFF object undefined!', true);
                 showError('LIFF SDK 未載入');
                 return;
             }
-            
+
             debugLog('LIFF SDK loaded OK');
-            
+
             // Start initialization
-            initializeLiff().catch(function(err) {
+            initializeLiff().catch(function (err) {
                 debugLog('initializeLiff error: ' + err.message, true);
                 showError('初始化失敗: ' + err.message);
             });
         });
-        
+
         // Also catch any uncaught errors
-        window.onerror = function(msg, url, line, col, error) {
+        window.onerror = function (msg, url, line, col, error) {
             console.error('[GLOBAL ERROR]', msg, url, line);
             if (typeof debugLog === 'function') {
                 debugLog('JS Error: ' + msg, true);
