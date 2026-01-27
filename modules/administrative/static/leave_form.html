@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-TW">
 
 <head>
@@ -6,10 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>請假申請 - HSIB Admin System</title>
 
-    <!-- LIFF SDK - with error handling -->
-    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"
-        onerror="window.liffLoadError=true;"></script>
-    </script>
+    <!-- LIFF SDK (Official CDN) - Must load before app script, NOT async -->
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+    <!-- App Logic (External JS to bypass CSP inline script restrictions) -->
+    <script src="/api/administrative/liff/leave_form.js?v=fixed3"></script>
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -390,7 +391,9 @@
     <!-- Loading State -->
     <div id="loading-container" class="loading-container">
         <div class="spinner"></div>
-        <p class="loading-text">正在載入您的資料...</p>
+        <p class="loading-text">系統啟動中...</p>
+        <p id="loading-debug"
+            style="margin-top: 12px; font-size: 0.75rem; color: #999; max-width: 300px; word-break: break-all;"></p>
     </div>
 
     <!-- Error State -->
@@ -402,6 +405,24 @@
             <button class="btn btn-secondary" onclick="location.reload()">重新整理</button>
             <button class="btn btn-secondary" onclick="showDebugOverlay()" style="background: #666;">顯示除錯資訊</button>
         </div>
+    </div>
+
+    <!-- Account Binding State -->
+    <div id="binding-container" class="error-container" style="display: none;">
+        <div class="error-icon">🔗</div>
+        <h2 class="error-title" style="color: var(--primary);">帳號綁定</h2>
+        <p class="error-message">您的 LINE 帳號尚未綁定公司信箱，<br>請輸入公司 Email 完成綁定。</p>
+        <div class="card" style="width: 100%; max-width: 400px; text-align: left;">
+            <div class="form-group">
+                <label class="form-label required" for="binding-email">公司 Email</label>
+                <input type="email" id="binding-email" class="form-input" placeholder="your.name@company.com" required>
+            </div>
+            <button class="btn btn-primary" onclick="sendBindingEmail()" id="binding-btn">
+                <span>📧</span>
+                <span>發送驗證信</span>
+            </button>
+        </div>
+        <p id="binding-status" style="margin-top: 16px; color: var(--text-light); display: none;"></p>
     </div>
 
     <!-- Success State -->
@@ -494,391 +515,6 @@
         </button>
     </div>
 
-    <script>
-        // Configuration
-        const API_BASE_URL = window.location.origin;
-        const LIFF_ID = ''; // Will be replaced by build process or config
-        const FETCH_TIMEOUT_MS = 15000; // 15 second timeout for API calls
-
-        // State
-        let userId = null;
-        let userProfile = null;
-
-        // Debug console overlay for mobile devices
-        const debugLogs = [];
-        const DEBUG_MODE = new URLSearchParams(window.location.search).has('debug') || true; // Always show for now
-        function createDebugOverlay() {
-            const overlay = document.createElement('div');
-            overlay.id = 'debug-overlay';
-            overlay.style.cssText = `
-                position: fixed; bottom: 10px; right: 10px; width: 300px; max-height: 200px;
-                background: rgba(0,0,0,0.85); color: #0f0; font-size: 11px; font-family: monospace;
-                padding: 8px; border-radius: 8px; overflow-y: auto; z-index: 9999; display: ${DEBUG_MODE ? 'block' : 'none'};
-            `;
-            overlay.innerHTML = '<div style="margin-bottom:4px;font-weight:bold;">Debug Console <button onclick="this.parentElement.style.display=\'none\'" style="float:right;background:#333;color:#fff;border:none;padding:2px 6px;cursor:pointer;">×</button></div><div id="debug-logs"></div>';
-            document.body.appendChild(overlay);
-        }
-        function debugLog(msg, isError = false) {
-            const timestamp = new Date().toLocaleTimeString();
-            const logEntry = `[${timestamp}] ${msg}`;
-            debugLogs.push(logEntry);
-            console.log(logEntry);
-            const logsDiv = document.getElementById('debug-logs');
-            if (logsDiv) {
-                const entry = document.createElement('div');
-                entry.textContent = logEntry;
-                entry.style.color = isError ? '#f66' : '#0f0';
-                logsDiv.appendChild(entry);
-                logsDiv.scrollTop = logsDiv.scrollHeight;
-            }
-        }
-        function showDebugOverlay() {
-            const overlay = document.getElementById('debug-overlay');
-            if (overlay) overlay.style.display = 'block';
-        }
-
-        // Fetch with timeout wrapper
-        async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-            try {
-                const response = await fetch(url, { ...options, signal: controller.signal });
-                clearTimeout(timeoutId);
-                return response;
-            } catch (error) {
-                clearTimeout(timeoutId);
-                if (error.name === 'AbortError') {
-                    throw new Error(`請求超時 (${timeoutMs / 1000}秒)`);
-                }
-                throw error;
-            }
-        }
-
-        // Initialize LIFF
-        async function initializeLiff() {
-            createDebugOverlay();
-
-            // Auto-detect localhost or dev environment
-            const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-
-            // Check for test mode (skip LIFF for debugging)
-            const urlParams = new URLSearchParams(window.location.search);
-            if (urlParams.get('testUserId') || (isLocalhost && !urlParams.get('liffId'))) {
-                const testUser = urlParams.get('testUserId') || 'dev_user_auto';
-                debugLog('Development mode enabled: ' + testUser);
-                userId = testUser;
-                userProfile = { displayName: 'Dev User' };
-                document.querySelector('.loading-text').textContent = '開發模式：載入測試資料...';
-                await loadUserData(); // This will use the mock backend we enabled
-                return;
-            }
-
-            try {
-                // Update loading text
-                document.querySelector('.loading-text').textContent = '正在載入設定...';
-                debugLog('Starting initialization...');
-
-                // Fetch LIFF config from backend
-                let liffId = '';
-                try {
-                    debugLog(`Fetching config from: ${API_BASE_URL}/api/administrative/liff/config`);
-                    const configResponse = await fetchWithTimeout(`${API_BASE_URL}/api/administrative/liff/config`);
-                    if (configResponse.ok) {
-                        const config = await configResponse.json();
-                        liffId = config.liff_id_leave;
-                        debugLog('Loaded LIFF ID: ' + liffId);
-                    } else {
-                        debugLog('Config response not OK: ' + configResponse.status, true);
-                    }
-                } catch (e) {
-                    debugLog('Failed to fetch config: ' + e.message, true);
-                    showDebugOverlay();
-                }
-
-                // Fallback to URL param or default
-                if (!liffId) {
-                    const urlParams = new URLSearchParams(window.location.search);
-                    liffId = urlParams.get('liffId') || LIFF_ID;
-                }
-
-                if (!liffId) {
-                    // Update loading text
-                    document.querySelector('.loading-text').textContent = '啟動開發模式...';
-
-                    // Development mode - use mock data
-                    console.warn('No LIFF ID provided, running in dev mode');
-                    await initDevMode();
-                    return;
-                }
-
-                document.querySelector('.loading-text').textContent = '正在初始化 LIFF...';
-                debugLog('Initializing LIFF with ID: ' + liffId);
-
-                try {
-                    await liff.init({ liffId });
-                    debugLog('LIFF init success, isInClient: ' + liff.isInClient());
-                } catch (liffError) {
-                    debugLog('LIFF init failed: ' + liffError.message, true);
-                    showDebugOverlay();
-                    showError('LIFF 初始化失敗: ' + liffError.message);
-                    return;
-                }
-
-                // Check if running inside LINE app
-                const isInLineApp = liff.isInClient();
-                debugLog('Is in LINE app: ' + isInLineApp);
-
-                if (!liff.isLoggedIn()) {
-                    if (!isInLineApp) {
-                        // In external browser, show message instead of auto-login
-                        debugLog('Not logged in and not in LINE app', true);
-                        showDebugOverlay();
-                        showError('請從 LINE 應用程式開啟此頁面，或點擊下方按鈕登入');
-                        // Add a login button dynamically
-                        const errorContainer = document.getElementById('error-container');
-                        const loginBtn = document.createElement('button');
-                        loginBtn.className = 'btn btn-primary';
-                        loginBtn.style.marginTop = '12px';
-                        loginBtn.textContent = '使用 LINE 登入';
-                        loginBtn.onclick = () => liff.login();
-                        errorContainer.querySelector('div').appendChild(loginBtn);
-                        return;
-                    }
-                    document.querySelector('.loading-text').textContent = '正在登入...';
-                    debugLog('Not logged in, redirecting to login...');
-                    liff.login();
-                    return;
-                }
-
-                // Get user profile
-                debugLog('Getting user profile...');
-                const profile = await liff.getProfile();
-                userId = profile.userId;
-                userProfile = profile;
-
-                debugLog('LIFF initialized, userId: ' + userId);
-
-                // Load user data from backend
-                document.querySelector('.loading-text').textContent = '正在載入使用者資料...';
-                await loadUserData();
-
-            } catch (error) {
-                debugLog('LIFF init error: ' + error.message, true);
-                showDebugOverlay();
-                showError('無法初始化 LINE 登入: ' + error.message);
-            }
-        }
-
-        // Development mode with mock data
-        async function initDevMode() {
-            userId = 'dev_user_123';
-            userProfile = { displayName: 'Developer' };
-
-            // Simulate loading
-            await new Promise(r => setTimeout(r, 500));
-
-            // Show mock data
-            document.getElementById('user-name').textContent = '測試使用者';
-            document.getElementById('user-dept').textContent = '開發部';
-            document.getElementById('user-email').textContent = 'dev@example.com';
-
-            showForm();
-        }
-
-        // Load user data from backend
-        async function loadUserData() {
-            try {
-                debugLog(`Loading user data for: ${userId}`);
-                const response = await fetchWithTimeout(
-                    `${API_BASE_URL}/api/administrative/leave/init`,
-                    {
-                        headers: {
-                            'X-Line-User-ID': userId,
-                            'Content-Type': 'application/json',
-                        },
-                    }
-                );
-
-                if (!response.ok) {
-                    let errorDetail = `HTTP ${response.status}`;
-                    try {
-                        const error = await response.json();
-                        errorDetail = error.detail || errorDetail;
-                    } catch (e) {
-                        // Response might not be JSON
-                    }
-                    debugLog('API Error: ' + errorDetail, true);
-
-                    // Handle specific error cases with user-friendly messages
-                    if (response.status === 401) {
-                        showError('尚未完成身份驗證，請先完成身份綁定後再使用請假功能');
-                        return;
-                    }
-                    if (response.status === 404) {
-                        showError('找不到您的員工資料，請聯繫人資部門');
-                        return;
-                    }
-                    throw new Error(errorDetail);
-                }
-
-                const data = await response.json();
-                debugLog('User data loaded successfully');
-
-                // Populate user info
-                document.getElementById('user-name').textContent = data.name || '-';
-                document.getElementById('user-dept').textContent = data.department || '-';
-                document.getElementById('user-email').textContent = data.email || '-';
-
-                // Set default date to tomorrow
-                const tomorrow = new Date();
-                tomorrow.setDate(tomorrow.getDate() + 1);
-                document.getElementById('leave-date').value = tomorrow.toISOString().split('T')[0];
-
-                showForm();
-
-            } catch (error) {
-                debugLog('Load user data error: ' + error.message, true);
-                showDebugOverlay();
-                showError(error.message);
-            }
-        }
-
-        // Submit form
-        async function submitForm(event) {
-            event.preventDefault();
-
-            const submitBtn = document.getElementById('submit-btn');
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = '<span class="spinner" style="width:20px;height:20px;border-width:2px;"></span><span>處理中...</span>';
-
-            try {
-                const formData = {
-                    leave_date: document.getElementById('leave-date').value,
-                    leave_type: document.getElementById('leave-type').value,
-                    start_time: document.getElementById('start-time').value,
-                    end_time: document.getElementById('end-time').value,
-                    reason: document.getElementById('reason').value,
-                };
-
-                const response = await fetch(
-                    `${API_BASE_URL}/api/administrative/leave/submit`,
-                    {
-                        method: 'POST',
-                        headers: {
-                            'X-Line-User-ID': userId,
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify(formData),
-                    }
-                );
-
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.detail || 'Submission failed');
-                }
-
-                const result = await response.json();
-                console.log('Submission result:', result);
-
-                showSuccess();
-
-            } catch (error) {
-                console.error('Submit error:', error);
-                alert('送出失敗: ' + error.message);
-
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = '<span>📤</span><span>送出申請</span>';
-            }
-        }
-
-        // UI State functions
-        function showLoading() {
-            document.getElementById('loading-container').style.display = 'flex';
-            document.getElementById('error-container').style.display = 'none';
-            document.getElementById('success-container').style.display = 'none';
-            document.getElementById('form-container').classList.remove('active');
-            document.getElementById('submit-section').classList.add('hidden');
-        }
-
-        function showError(message) {
-            document.getElementById('loading-container').style.display = 'none';
-            document.getElementById('error-container').style.display = 'flex';
-            // Provide user-friendly error messages
-            let userMessage = message;
-            if (message.includes('超時') || message.includes('timeout')) {
-                userMessage = '連線逾時，請檢查網路後重試';
-            } else if (message.includes('fetch') || message.includes('network')) {
-                userMessage = '網路連線失敗，請稍後再試';
-            }
-            document.getElementById('error-message').textContent = userMessage;
-            document.getElementById('success-container').style.display = 'none';
-            document.getElementById('form-container').classList.remove('active');
-            document.getElementById('submit-section').classList.add('hidden');
-        }
-
-        function showForm() {
-            document.getElementById('loading-container').style.display = 'none';
-            document.getElementById('error-container').style.display = 'none';
-            document.getElementById('success-container').style.display = 'none';
-            document.getElementById('form-container').classList.add('active');
-            document.getElementById('submit-section').classList.remove('hidden');
-        }
-
-        function showSuccess() {
-            document.getElementById('loading-container').style.display = 'none';
-            document.getElementById('error-container').style.display = 'none';
-            document.getElementById('success-container').style.display = 'flex';
-            document.getElementById('form-container').classList.remove('active');
-            document.getElementById('submit-section').classList.add('hidden');
-        }
-
-        function closeWindow() {
-            if (liff && liff.isInClient()) {
-                liff.closeWindow();
-            } else {
-                window.close();
-            }
-        }
-
-        // Initialize on load with error handling
-        document.addEventListener('DOMContentLoaded', function () {
-            console.log('[DEBUG] DOMContentLoaded fired');
-
-            // Immediately show debug info
-            createDebugOverlay();
-            debugLog('DOM loaded, starting...');
-
-            // Check if LIFF SDK loaded
-            if (window.liffLoadError) {
-                debugLog('LIFF SDK failed to load!', true);
-                showError('LIFF SDK 載入失敗，請檢查網路連線');
-                return;
-            }
-
-            if (typeof liff === 'undefined') {
-                debugLog('LIFF object undefined!', true);
-                showError('LIFF SDK 未載入');
-                return;
-            }
-
-            debugLog('LIFF SDK loaded OK');
-
-            // Start initialization
-            initializeLiff().catch(function (err) {
-                debugLog('initializeLiff error: ' + err.message, true);
-                showError('初始化失敗: ' + err.message);
-            });
-        });
-
-        // Also catch any uncaught errors
-        window.onerror = function (msg, url, line, col, error) {
-            console.error('[GLOBAL ERROR]', msg, url, line);
-            if (typeof debugLog === 'function') {
-                debugLog('JS Error: ' + msg, true);
-            }
-            return false;
-        };
-    </script>
 </body>
 
 </html>

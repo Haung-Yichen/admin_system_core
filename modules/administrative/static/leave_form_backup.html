@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>請假申請 - HSIB Admin System</title>
+
+    <!-- Global Error Handler -->
+    <script>
+        window.onerror = function (msg, url, line, col, error) {
+            var el = document.getElementById('loading-debug');
+            if (el) el.innerHTML += '<br><span style="color:red">Global Error: ' + msg + ' (Line ' + line + ')</span>';
+            var txt = document.querySelector('.loading-text');
+            if (txt) txt.textContent = '發生錯誤 (JS Error)';
+            return false;
+        };
+    </script>
+
+    <!-- LIFF SDK - with error handling -->
+    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js" onerror="window.liffLoadError=true;"
+        async></script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap"
+        rel="stylesheet">
+
+    <style>
+        :root {
+            --primary: #1A1A2E;
+            --primary-light: #16213E;
+            --accent: #06C755;
+            --accent-hover: #05B34C;
+            --danger: #E74C3C;
+            --warning: #F39C12;
+            --text: #333333;
+            --text-light: #666666;
+            --text-muted: #999999;
+            --bg: #F5F7FA;
+            --card-bg: #FFFFFF;
+            --border: #E0E0E0;
+            --shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            --radius: 16px;
+            --radius-sm: 8px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans TC', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding-bottom: 100px;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+            color: white;
+            padding: 24px 20px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .header p {
+            font-size: 0.875rem;
+            opacity: 0.8;
+        }
+
+        /* Loading State */
+        .loading-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 60vh;
+            padding: 40px 20px;
+        }
+
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 4px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .loading-text {
+            margin-top: 16px;
+            color: var(--text-light);
+            font-size: 0.9rem;
+        }
+
+        /* Error State */
+        .error-container {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 60vh;
+            padding: 40px 20px;
+            text-align: center;
+        }
+
+        .error-icon {
+            font-size: 4rem;
+            margin-bottom: 16px;
+        }
+
+        .error-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--danger);
+        }
+
+        .error-message {
+            color: var(--text-light);
+            margin-bottom: 24px;
+        }
+
+        /* Form Container */
+        .form-container {
+            display: none;
+            padding: 20px;
+        }
+
+        .form-container.active {
+            display: block;
+        }
+
+        /* Card */
+        .card {
+            background: var(--card-bg);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+
+        .card-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Form Group */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text);
+            margin-bottom: 8px;
+        }
+
+        .form-label.required::after {
+            content: " *";
+            color: var(--danger);
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 14px 16px;
+            font-size: 1rem;
+            font-family: inherit;
+            border: 2px solid var(--border);
+            border-radius: var(--radius-sm);
+            background: var(--card-bg);
+            color: var(--text);
+            transition: all 0.2s ease;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(6, 199, 85, 0.1);
+        }
+
+        .form-input:disabled {
+            background: var(--bg);
+            color: var(--text-light);
+            cursor: not-allowed;
+        }
+
+        .form-input.readonly {
+            background: var(--bg);
+            border-style: dashed;
+        }
+
+        textarea.form-input {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        select.form-input {
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 16px center;
+            padding-right: 40px;
+        }
+
+        /* User Info Display */
+        .user-info {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .user-info-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: var(--bg);
+            border-radius: var(--radius-sm);
+        }
+
+        .user-info-icon {
+            width: 40px;
+            height: 40px;
+            background: var(--primary);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+        }
+
+        .user-info-content {
+            flex: 1;
+        }
+
+        .user-info-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .user-info-value {
+            font-size: 1rem;
+            font-weight: 500;
+            color: var(--text);
+        }
+
+        /* Submit Button */
+        .submit-section {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 16px 20px;
+            background: var(--card-bg);
+            border-top: 1px solid var(--border);
+            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.05);
+        }
+
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            padding: 16px 24px;
+            font-size: 1rem;
+            font-weight: 600;
+            font-family: inherit;
+            border: none;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: var(--accent-hover);
+            transform: translateY(-1px);
+        }
+
+        .btn-primary:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .btn-primary:disabled {
+            background: var(--border);
+            color: var(--text-muted);
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: var(--bg);
+            color: var(--text);
+            border: 2px solid var(--border);
+        }
+
+        /* Success State */
+        .success-container {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 60vh;
+            padding: 40px 20px;
+            text-align: center;
+        }
+
+        .success-icon {
+            width: 80px;
+            height: 80px;
+            background: var(--accent);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+            margin-bottom: 24px;
+            animation: scaleIn 0.3s ease;
+        }
+
+        @keyframes scaleIn {
+            from {
+                transform: scale(0);
+            }
+
+            to {
+                transform: scale(1);
+            }
+        }
+
+        .success-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--primary);
+        }
+
+        .success-message {
+            color: var(--text-light);
+            margin-bottom: 32px;
+        }
+
+        /* Utilities */
+        .hidden {
+            display: none !important;
+        }
+
+        .text-center {
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Header -->
+    <header class="header">
+        <h1>📅 請假申請</h1>
+        <p>Leave Request Form</p>
+    </header>
+
+    <!-- Loading State -->
+    <div id="loading-container" class="loading-container">
+        <div class="spinner"></div>
+        <p class="loading-text">系統啟動中...</p>
+        <p id="loading-debug"
+            style="margin-top: 12px; font-size: 0.75rem; color: #999; max-width: 300px; word-break: break-all;"></p>
+    </div>
+
+    <!-- Error State -->
+    <div id="error-container" class="error-container">
+        <div class="error-icon">⚠️</div>
+        <h2 class="error-title">無法載入</h2>
+        <p class="error-message" id="error-message">請檢查網路連線後重試</p>
+        <div style="display: flex; gap: 12px; flex-wrap: wrap; justify-content: center;">
+            <button class="btn btn-secondary" onclick="location.reload()">重新整理</button>
+            <button class="btn btn-secondary" onclick="showDebugOverlay()" style="background: #666;">顯示除錯資訊</button>
+        </div>
+    </div>
+
+    <!-- Account Binding State -->
+    <div id="binding-container" class="error-container" style="display: none;">
+        <div class="error-icon">🔗</div>
+        <h2 class="error-title" style="color: var(--primary);">帳號綁定</h2>
+        <p class="error-message">您的 LINE 帳號尚未綁定公司信箱，<br>請輸入公司 Email 完成綁定。</p>
+        <div class="card" style="width: 100%; max-width: 400px; text-align: left;">
+            <div class="form-group">
+                <label class="form-label required" for="binding-email">公司 Email</label>
+                <input type="email" id="binding-email" class="form-input" placeholder="your.name@company.com" required>
+            </div>
+            <button class="btn btn-primary" onclick="sendBindingEmail()" id="binding-btn">
+                <span>📧</span>
+                <span>發送驗證信</span>
+            </button>
+        </div>
+        <p id="binding-status" style="margin-top: 16px; color: var(--text-light); display: none;"></p>
+    </div>
+
+    <!-- Success State -->
+    <div id="success-container" class="success-container">
+        <div class="success-icon">✓</div>
+        <h2 class="success-title">申請已送出</h2>
+        <p class="success-message">您的請假申請已成功送出，<br>請等待主管審核。</p>
+        <button class="btn btn-primary" onclick="closeWindow()">關閉視窗</button>
+    </div>
+
+    <!-- Form -->
+    <main id="form-container" class="form-container">
+        <!-- User Info Card -->
+        <div class="card">
+            <h2 class="card-title">👤 申請人資訊</h2>
+            <div class="user-info">
+                <div class="user-info-item">
+                    <div class="user-info-icon">👤</div>
+                    <div class="user-info-content">
+                        <div class="user-info-label">姓名</div>
+                        <div class="user-info-value" id="user-name">-</div>
+                    </div>
+                </div>
+                <div class="user-info-item">
+                    <div class="user-info-icon">🏢</div>
+                    <div class="user-info-content">
+                        <div class="user-info-label">部門</div>
+                        <div class="user-info-value" id="user-dept">-</div>
+                    </div>
+                </div>
+                <div class="user-info-item">
+                    <div class="user-info-icon">✉️</div>
+                    <div class="user-info-content">
+                        <div class="user-info-label">Email</div>
+                        <div class="user-info-value" id="user-email">-</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Leave Details Card -->
+        <div class="card">
+            <h2 class="card-title">📝 請假資訊</h2>
+
+            <form id="leave-form" onsubmit="submitForm(event)">
+                <div class="form-group">
+                    <label class="form-label required" for="leave-type">請假類別</label>
+                    <select id="leave-type" class="form-input" required>
+                        <option value="">請選擇假別</option>
+                        <option value="annual">特休假</option>
+                        <option value="personal">事假</option>
+                        <option value="sick">病假</option>
+                        <option value="official">公假</option>
+                        <option value="marriage">婚假</option>
+                        <option value="funeral">喪假</option>
+                        <option value="maternity">產假</option>
+                        <option value="paternity">陪產假</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label required" for="leave-date">請假日期</label>
+                    <input type="date" id="leave-date" class="form-input" required>
+                </div>
+
+                <div class="form-group" style="display: flex; gap: 12px;">
+                    <div style="flex: 1;">
+                        <label class="form-label" for="start-time">開始時間</label>
+                        <input type="time" id="start-time" class="form-input" value="09:00">
+                    </div>
+                    <div style="flex: 1;">
+                        <label class="form-label" for="end-time">結束時間</label>
+                        <input type="time" id="end-time" class="form-input" value="18:00">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label required" for="reason">請假事由</label>
+                    <textarea id="reason" class="form-input" placeholder="請說明請假原因..." required></textarea>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <!-- Submit Button (Fixed) -->
+    <div id="submit-section" class="submit-section hidden">
+        <button type="submit" form="leave-form" class="btn btn-primary" id="submit-btn">
+            <span>📤</span>
+            <span>送出申請</span>
+        </button>
+    </div>
+
+    <script>
+        // Configuration
+        const API_BASE_URL = window.location.origin;
+        const LIFF_ID = ''; // Will be replaced by build process or config
+        const FETCH_TIMEOUT_MS = 15000; // 15 second timeout for API calls
+
+        // State
+        let userId = null;
+        let userProfile = null;
+        let idToken = null;  // LINE ID Token for authentication
+        let lineSub = null;  // LINE sub (OIDC Subject Identifier) for binding
+
+        // Debug console overlay for mobile devices
+        const debugLogs = [];
+        const DEBUG_MODE = new URLSearchParams(window.location.search).has('debug') || true; // Always show for now
+        function createDebugOverlay() {
+            if (document.getElementById('debug-overlay')) return; // Prevent duplicate
+            const overlay = document.createElement('div');
+            overlay.id = 'debug-overlay';
+            overlay.style.cssText = `
+                position: fixed; bottom: 10px; right: 10px; width: 300px; max-height: 200px;
+                background: rgba(0,0,0,0.85); color: #0f0; font-size: 11px; font-family: monospace;
+                padding: 8px; border-radius: 8px; overflow-y: auto; z-index: 9999; display: ${DEBUG_MODE ? 'block' : 'none'};
+            `;
+            overlay.innerHTML = '<div style="margin-bottom:4px;font-weight:bold;">Debug Console <button onclick="this.parentElement.style.display=\'none\'" style="float:right;background:#333;color:#fff;border:none;padding:2px 6px;cursor:pointer;">×</button></div><div id="debug-logs"></div>';
+            document.body.appendChild(overlay);
+        }
+        function debugLog(msg, isError = false) {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = `[${timestamp}] ${msg}`;
+            debugLogs.push(logEntry);
+            console.log(logEntry);
+
+            // Also update the loading debug area (always visible during loading)
+            const loadingDebug = document.getElementById('loading-debug');
+            if (loadingDebug) {
+                loadingDebug.textContent = msg;
+            }
+
+            const logsDiv = document.getElementById('debug-logs');
+            if (logsDiv) {
+                const entry = document.createElement('div');
+                entry.textContent = logEntry;
+                entry.style.color = isError ? '#f66' : '#0f0';
+                logsDiv.appendChild(entry);
+                logsDiv.scrollTop = logsDiv.scrollHeight;
+            }
+        }
+        function showDebugOverlay() {
+            const overlay = document.getElementById('debug-overlay');
+            if (overlay) overlay.style.display = 'block';
+        }
+
+        // Fetch with timeout wrapper
+        async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                const response = await fetch(url, { ...options, signal: controller.signal });
+                clearTimeout(timeoutId);
+                return response;
+            } catch (error) {
+                clearTimeout(timeoutId);
+                if (error.name === 'AbortError') {
+                    throw new Error(`請求超時 (${timeoutMs / 1000}秒)`);
+                }
+                throw error;
+            }
+        }
+
+        // Initialize LIFF
+        async function initializeLiff() {
+            createDebugOverlay();
+
+            // Auto-detect localhost or dev environment
+            const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+
+            // Check for explicit test mode (only with testUserId param, not auto-detected localhost)
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('testUserId')) {
+                const testUser = urlParams.get('testUserId');
+                debugLog('Development mode enabled: ' + testUser);
+                userId = testUser;
+                userProfile = { displayName: 'Dev User' };
+                idToken = 'dev_mode_token';  // Mock token for dev mode
+                document.querySelector('.loading-text').textContent = '開發模式：載入測試資料...';
+                await loadUserData(); // This will use the mock backend we enabled
+                return;
+            }
+
+            try {
+                // Update loading text
+                document.querySelector('.loading-text').textContent = '正在載入設定...';
+                debugLog('Starting initialization...');
+
+                // Fetch LIFF config from backend
+                let liffId = '';
+                try {
+                    debugLog(`Fetching config from: ${API_BASE_URL}/api/administrative/liff/config`);
+                    const configResponse = await fetchWithTimeout(`${API_BASE_URL}/api/administrative/liff/config`);
+                    if (configResponse.ok) {
+                        const config = await configResponse.json();
+                        liffId = config.liff_id_leave;
+                        debugLog('Loaded LIFF ID: ' + liffId);
+                    } else {
+                        debugLog('Config response not OK: ' + configResponse.status, true);
+                    }
+                } catch (e) {
+                    debugLog('Failed to fetch config: ' + e.message, true);
+                    showDebugOverlay();
+                }
+
+                // Fallback to URL param or default
+                if (!liffId) {
+                    liffId = urlParams.get('liffId') || LIFF_ID;
+                }
+
+                if (!liffId) {
+                    // No LIFF ID available - show helpful error for localhost development
+                    if (isLocalhost) {
+                        debugLog('No LIFF ID configured - showing setup instructions', true);
+                        showError(
+                            'LIFF ID 尚未設定。\n\n' +
+                            '【開發測試方式】\n' +
+                            '1. 在 URL 加上 ?testUserId=test123 進入開發模式\n' +
+                            '2. 或設定 LINE_LIFF_ID_LEAVE 環境變數\n\n' +
+                            '【正式使用方式】\n' +
+                            '請從 LINE 應用程式開啟此頁面'
+                        );
+                    } else {
+                        debugLog('No LIFF ID in production environment', true);
+                        showError('系統設定錯誤，請聯繫管理員（LIFF ID 未設定）');
+                    }
+                    return;
+                }
+
+                document.querySelector('.loading-text').textContent = '正在初始化 LIFF...';
+                debugLog('Initializing LIFF with ID: ' + liffId);
+
+                try {
+                    await liff.init({ liffId });
+                    debugLog('LIFF init success, isInClient: ' + liff.isInClient());
+                } catch (liffError) {
+                    debugLog('LIFF init failed: ' + liffError.message, true);
+                    showDebugOverlay();
+                    showError('LIFF 初始化失敗: ' + liffError.message);
+                    return;
+                }
+
+                // Check if running inside LINE app
+                const isInLineApp = liff.isInClient();
+                debugLog('Is in LINE app: ' + isInLineApp);
+
+                if (!liff.isLoggedIn()) {
+                    if (!isInLineApp) {
+                        // In external browser, show message instead of auto-login
+                        debugLog('Not logged in and not in LINE app', true);
+                        showDebugOverlay();
+                        showError('請從 LINE 應用程式開啟此頁面，或點擊下方按鈕登入');
+                        // Add a login button dynamically
+                        const errorContainer = document.getElementById('error-container');
+                        const loginBtn = document.createElement('button');
+                        loginBtn.className = 'btn btn-primary';
+                        loginBtn.style.marginTop = '12px';
+                        loginBtn.textContent = '使用 LINE 登入';
+                        loginBtn.onclick = () => liff.login();
+                        errorContainer.querySelector('div').appendChild(loginBtn);
+                        return;
+                    }
+                    document.querySelector('.loading-text').textContent = '正在登入...';
+                    debugLog('Not logged in, redirecting to login...');
+                    liff.login();
+                    return;
+                }
+
+                // Get user profile
+                debugLog('Getting user profile...');
+                const profile = await liff.getProfile();
+                userId = profile.userId;
+                userProfile = profile;
+
+                debugLog('LIFF initialized, userId: ' + userId);
+
+                // Get ID Token for authentication
+                debugLog('Getting LINE ID Token...');
+                idToken = liff.getIDToken();
+
+                if (!idToken) {
+                    debugLog('ID Token is null - user may not have granted email permission', true);
+                    showDebugOverlay();
+                    showError(
+                        '無法取得驗證權杖。請確保您已授權 Email 存取權限。\n' +
+                        '請重新登入並在登入時勾選「電子郵件」授權。'
+                    );
+                    // Add re-login button
+                    const errorContainer = document.getElementById('error-container');
+                    const reloginBtn = document.createElement('button');
+                    reloginBtn.className = 'btn btn-primary';
+                    reloginBtn.style.marginTop = '12px';
+                    reloginBtn.textContent = '重新登入並授權';
+                    reloginBtn.onclick = () => {
+                        // Force re-login to request email permission
+                        liff.logout();
+                        liff.login({ redirectUri: window.location.href });
+                    };
+                    errorContainer.querySelector('div').appendChild(reloginBtn);
+                    return;
+                }
+
+                debugLog('ID Token obtained successfully');
+
+                // Load user data from backend
+                document.querySelector('.loading-text').textContent = '正在載入使用者資料...';
+                await loadUserData();
+
+            } catch (error) {
+                debugLog('LIFF init error: ' + error.message, true);
+                showDebugOverlay();
+                showError('無法初始化 LINE 登入: ' + error.message);
+            }
+        }
+
+        // Development mode with mock data
+        async function initDevMode() {
+            userId = 'dev_user_123';
+            userProfile = { displayName: 'Developer' };
+
+            // Simulate loading
+            await new Promise(r => setTimeout(r, 500));
+
+            // Show mock data
+            document.getElementById('user-name').textContent = '測試使用者';
+            document.getElementById('user-dept').textContent = '開發部';
+            document.getElementById('user-email').textContent = 'dev@example.com';
+
+            showForm();
+        }
+
+        // Load user data from backend
+        async function loadUserData() {
+            try {
+                debugLog(`Loading user data...`);
+
+                // Build headers with LINE authentication
+                const headers = {
+                    'Content-Type': 'application/json',
+                };
+
+                // Prefer X-Line-User-Id (from profile) - matches webhook userId
+                if (userId) {
+                    // Ensure userId is a clean string
+                    const cleanUserId = String(userId).trim().replace(/[^\x20-\x7E]/g, '');
+                    if (cleanUserId) headers['X-Line-User-Id'] = cleanUserId;
+                    debugLog('Using LINE User ID for authentication: ' + cleanUserId.substring(0, 8) + '...');
+                }
+
+                // Also include ID Token as fallback
+                if (idToken) {
+                    // Ensure idToken is a clean string
+                    const cleanIdToken = String(idToken).trim();
+                    // Check for invalid chars (Strict ASCII)
+                    if (/^[\x20-\x7E]*$/.test(cleanIdToken)) {
+                        headers['X-Line-ID-Token'] = cleanIdToken;
+                        debugLog('Also including ID Token');
+                    } else {
+                        debugLog('Warning: ID Token contains invalid characters, skipping');
+                    }
+                }
+
+                if (!userId && !idToken) {
+                    debugLog('Warning: No authentication credentials available', true);
+                }
+
+                const response = await fetchWithTimeout(
+                    `${API_BASE_URL}/api/administrative/leave/init`,
+                    { headers }
+                );
+
+                if (!response.ok) {
+                    let errorDetail = `HTTP ${response.status}`;
+                    let errorData = null;
+                    try {
+                        errorData = await response.json();
+                        errorDetail = errorData.detail || errorDetail;
+                    } catch (e) {
+                        // Response might not be JSON
+                    }
+                    debugLog('API Error: ' + JSON.stringify(errorDetail), true);
+
+                    // Handle 403 - Account not bound
+                    if (response.status === 403 && errorData && errorData.detail && errorData.detail.error === 'account_not_bound') {
+                        debugLog('Account not bound, showing binding UI');
+                        lineSub = errorData.detail.line_sub;
+                        showBindingUI(errorData.detail.line_name);
+                        return;
+                    }
+
+                    // Handle specific error cases with user-friendly messages
+                    if (response.status === 401) {
+                        // Authentication error - likely token expired or invalid
+                        let errorMsg = '身份驗證失敗。';
+                        if (typeof errorDetail === 'string') {
+                            if (errorDetail.includes('expired')) {
+                                errorMsg = 'LINE ID Token 已過期，請重新開啟此頁面。';
+                            } else {
+                                errorMsg = errorDetail;
+                            }
+                        }
+                        showError(errorMsg);
+                        return;
+                    }
+                    if (response.status === 404) {
+                        showError('找不到您的員工資料，請聯繫人資部門');
+                        return;
+                    }
+                    throw new Error(typeof errorDetail === 'string' ? errorDetail : JSON.stringify(errorDetail));
+                }
+
+                const data = await response.json();
+                debugLog('User data loaded successfully');
+
+                // Populate user info
+                document.getElementById('user-name').textContent = data.name || '-';
+                document.getElementById('user-dept').textContent = data.department || '-';
+                document.getElementById('user-email').textContent = data.email || '-';
+
+                // Set default date to tomorrow
+                const tomorrow = new Date();
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                document.getElementById('leave-date').value = tomorrow.toISOString().split('T')[0];
+
+                showForm();
+
+            } catch (error) {
+                debugLog('Load user data error: ' + error.message, true);
+                showDebugOverlay();
+                showError(error.message);
+            }
+        }
+
+        // Submit form
+        async function submitForm(event) {
+            event.preventDefault();
+
+            const submitBtn = document.getElementById('submit-btn');
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="spinner" style="width:20px;height:20px;border-width:2px;"></span><span>處理中...</span>';
+
+            try {
+                const formData = {
+                    leave_date: document.getElementById('leave-date').value,
+                    leave_type: document.getElementById('leave-type').value,
+                    start_time: document.getElementById('start-time').value,
+                    end_time: document.getElementById('end-time').value,
+                    reason: document.getElementById('reason').value,
+                };
+
+                // Build headers with LINE authentication
+                const headers = {
+                    'Content-Type': 'application/json',
+                };
+
+                // Prefer X-Line-User-Id (from profile) - matches webhook userId
+                if (userId) {
+                    headers['X-Line-User-Id'] = String(userId).trim();
+                }
+
+                // Also include ID Token as fallback
+                if (idToken) {
+                    const cleanIdToken = String(idToken).trim();
+                    if (/^[\x00-\xFF]*$/.test(cleanIdToken)) {
+                        headers['X-Line-ID-Token'] = cleanIdToken;
+                    }
+                }
+
+                const response = await fetch(
+                    `${API_BASE_URL}/api/administrative/leave/submit`,
+                    {
+                        method: 'POST',
+                        headers: headers,
+                        body: JSON.stringify(formData),
+                    }
+                );
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Submission failed');
+                }
+
+                const result = await response.json();
+                console.log('Submission result:', result);
+
+                showSuccess();
+
+            } catch (error) {
+                console.error('Submit error:', error);
+                alert('送出失敗: ' + error.message);
+
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<span>📤</span><span>送出申請</span>';
+            }
+        }
+
+        // UI State functions
+        function showLoading() {
+            document.getElementById('loading-container').style.display = 'flex';
+            document.getElementById('error-container').style.display = 'none';
+            document.getElementById('binding-container').style.display = 'none';
+            document.getElementById('success-container').style.display = 'none';
+            document.getElementById('form-container').classList.remove('active');
+            document.getElementById('submit-section').classList.add('hidden');
+        }
+
+        function showError(message) {
+            document.getElementById('loading-container').style.display = 'none';
+            document.getElementById('error-container').style.display = 'flex';
+            document.getElementById('binding-container').style.display = 'none';
+            // Provide user-friendly error messages
+            let userMessage = message;
+            if (message.includes('超時') || message.includes('timeout')) {
+                userMessage = '連線逾時，請檢查網路後重試';
+            } else if (message.includes('fetch') || message.includes('network')) {
+                userMessage = '網路連線失敗，請稍後再試';
+            }
+            document.getElementById('error-message').textContent = userMessage;
+            document.getElementById('success-container').style.display = 'none';
+            document.getElementById('form-container').classList.remove('active');
+            document.getElementById('submit-section').classList.add('hidden');
+        }
+
+        function showBindingUI(lineName) {
+            document.getElementById('loading-container').style.display = 'none';
+            document.getElementById('error-container').style.display = 'none';
+            document.getElementById('binding-container').style.display = 'flex';
+            document.getElementById('success-container').style.display = 'none';
+            document.getElementById('form-container').classList.remove('active');
+            document.getElementById('submit-section').classList.add('hidden');
+
+            // Update greeting if we have LINE name
+            if (lineName) {
+                document.querySelector('#binding-container .error-message').innerHTML =
+                    `您好 <strong>${lineName}</strong>！<br>您的 LINE 帳號尚未綁定公司信箱，<br>請輸入公司 Email 完成綁定。`;
+            }
+        }
+
+        async function sendBindingEmail() {
+            const emailInput = document.getElementById('binding-email');
+            const bindingBtn = document.getElementById('binding-btn');
+            const statusEl = document.getElementById('binding-status');
+            const email = emailInput.value.trim();
+
+            if (!email) {
+                alert('請輸入公司 Email');
+                return;
+            }
+
+            if (!lineSub) {
+                alert('無法取得 LINE 識別碼，請重新整理頁面');
+                return;
+            }
+
+            bindingBtn.disabled = true;
+            bindingBtn.innerHTML = '<span class="spinner" style="width:20px;height:20px;border-width:2px;"></span><span>發送中...</span>';
+            statusEl.style.display = 'none';
+
+            try {
+                debugLog(`Sending binding request for email: ${email}, lineSub: ${lineSub.substring(0, 8)}...`);
+
+                const response = await fetchWithTimeout(
+                    `${API_BASE_URL}/api/auth/magic-link`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            email: email,
+                            line_sub: lineSub
+                        })
+                    }
+                );
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || error.message || '發送失敗');
+                }
+
+                const result = await response.json();
+                debugLog('Binding email sent successfully');
+
+                statusEl.style.display = 'block';
+                statusEl.style.color = 'var(--accent)';
+                statusEl.innerHTML = `✅ 驗證信已發送至 <strong>${email}</strong><br>請查收並點擊信中的連結完成綁定。<br>綁定完成後請重新開啟此頁面。`;
+
+                bindingBtn.innerHTML = '<span>✅</span><span>已發送</span>';
+
+            } catch (error) {
+                debugLog('Binding error: ' + error.message, true);
+                statusEl.style.display = 'block';
+                statusEl.style.color = 'var(--danger)';
+                statusEl.textContent = '❌ ' + error.message;
+
+                bindingBtn.disabled = false;
+                bindingBtn.innerHTML = '<span>📧</span><span>重新發送</span>';
+            }
+        }
+
+        function showForm() {
+            document.getElementById('loading-container').style.display = 'none';
+            document.getElementById('error-container').style.display = 'none';
+            document.getElementById('success-container').style.display = 'none';
+            document.getElementById('form-container').classList.add('active');
+            document.getElementById('submit-section').classList.remove('hidden');
+        }
+
+        function showSuccess() {
+            document.getElementById('loading-container').style.display = 'none';
+            document.getElementById('error-container').style.display = 'none';
+            document.getElementById('success-container').style.display = 'flex';
+            document.getElementById('form-container').classList.remove('active');
+            document.getElementById('submit-section').classList.add('hidden');
+        }
+
+        function closeWindow() {
+            if (liff && liff.isInClient()) {
+                liff.closeWindow();
+            } else {
+                window.close();
+            }
+        }
+
+        // Initialize on load with error handling
+        // IIFE to prove script file is parsed and running
+        (function () {
+            try {
+                const txt = document.querySelector('.loading-text');
+                if (txt) txt.textContent = '載入程式中... (Script Start)';
+                console.log('Script block started');
+            } catch (e) {
+                console.error(e);
+            }
+        })();
+
+        document.addEventListener('DOMContentLoaded', async function () {
+            console.log('[DEBUG] DOMContentLoaded fired v3');
+
+            // Force update text to show JS is running
+            const loadingText = document.querySelector('.loading-text');
+            if (loadingText) loadingText.textContent = '系統初始化中... (DOM Ready)';
+
+            // Immediately show debug info
+            createDebugOverlay();
+            debugLog('DOM loaded, waiting for LIFF SDK...');
+
+            // Wait for LIFF SDK to load (max 10 seconds)
+            let attempts = 0;
+            // Wait slightly longer for mobile connections
+            while (typeof liff === 'undefined' && !window.liffLoadError && attempts < 100) {
+                if (attempts % 5 === 0 && loadingText) {
+                    loadingText.textContent = `正在連接 LINE 服務... (${Math.floor(attempts / 5)})`;
+                }
+                await new Promise(r => setTimeout(r, 100)); // check every 100ms
+                attempts++;
+            }
+
+            // Check if LIFF SDK loaded
+            if (window.liffLoadError) {
+                debugLog('LIFF SDK failed to load!', true);
+                showError('LIFF SDK 載入失敗 (Load Error)');
+                return;
+            }
+
+            if (typeof liff === 'undefined') {
+                debugLog('LIFF SDK load timeout!', true);
+                const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+                if (isLocal) {
+                    if (confirm('LIFF SDK 載入超時。是否進入開發模式？')) {
+                        // Manual mock for dev
+                        window.liff = {
+                            init: async () => { },
+                            isInClient: () => false,
+                            isLoggedIn: () => true,
+                            getProfile: async () => ({ userId: 'dev_user', displayName: 'Dev User' }),
+                            getIDToken: () => 'mock_token',
+                            closeWindow: () => alert('Close Window')
+                        };
+                        loadingText.textContent = '進入開發模式...';
+                    } else {
+                        showError('LIFF SDK 載入逾時 (Timeout)');
+                        return;
+                    }
+                } else {
+                    showError('LIFF SDK 載入逾時 (Timeout)');
+                    return;
+                }
+            }
+
+            debugLog('LIFF SDK loaded OK');
+            if (loadingText) loadingText.textContent = 'LINE 服務已連接';
+
+            // Start initialization
+            initializeLiff().catch(function (err) {
+                debugLog('initializeLiff error: ' + err.message, true);
+                showError('初始化失敗: ' + err.message);
+            });
+        });
+
+        // Also catch any uncaught errors
+        window.onerror = function (msg, url, line, col, error) {
+            console.error('[GLOBAL ERROR]', msg, url, line);
+            if (typeof debugLog === 'function') {
+                debugLog('JS Error: ' + msg, true);
+            }
+            return false;
+        };
+    </script>
+</body>
+
+</html>

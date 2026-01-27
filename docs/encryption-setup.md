@@ -64,7 +64,7 @@ The new schema with encryption will be created automatically.
 
 ⚠️ **NOTE**: The migration script for existing data is complex and requires careful execution. 
 
-Due to the schema changes (adding `email_hash`, `line_user_id_hash` columns and changing column types), you would need to:
+Due to the schema changes (adding `email_hash`, `line_sub_hash` columns and changing column types), you would need to:
 
 1. Export existing data
 2. Drop and recreate tables with new schema
@@ -94,7 +94,7 @@ You should see `ssl = t` (true).
 3. Check the database directly to confirm data is encrypted:
 
 ```powershell
-docker exec -it hsib-sop-db psql -U postgres -d hsib_sop_bot -c "SELECT email, line_user_id FROM users LIMIT 1;"
+docker exec -it hsib-sop-db psql -U postgres -d hsib_sop_bot -c "SELECT email, line_sub FROM users LIMIT 1;"
 ```
 
 The values should appear as hex-encoded encrypted data, not plaintext.

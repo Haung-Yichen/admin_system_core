@@ -47,14 +47,14 @@ def _get_app_config() -> dict:
     }
 
 
-def get_login_html(line_id: str, error: str | None = None, success: str | None = None) -> str:
+def get_login_html(line_sub: str, error: str | None = None, success: str | None = None) -> str:
     config = _get_app_config()
     app_name = config["app_name"]
     expire_minutes = config["magic_link_expire_minutes"]
-    
+
     error_html = f'<div class="alert alert-error">⚠️ {error}</div>' if error else ""
     success_html = f'<div class="alert alert-success">✅ {success}</div>' if success else ""
-    
+
     return f"""
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -86,7 +86,7 @@ def get_login_html(line_id: str, error: str | None = None, success: str | None =
         <div class="content">
             {error_html}{success_html}
             <form method="POST" action="/auth/request-magic-link">
-                <input type="hidden" name="line_user_id" value="{line_id}">
+                <input type="hidden" name="line_sub" value="{line_sub}">
                 <div class="form-group">
                     <label for="email">電子郵件 / Email</label>
                     <input type="email" id="email" name="email" placeholder="your.name@company.com" required>
@@ -107,7 +107,7 @@ def get_verification_result_html(success: bool, message: str) -> str:
     icon = "✅" if success else "❌"
     title = "驗證成功！" if success else "驗證失敗"
     bg = "#00B900" if success else "#DC2626"
-    
+
     return f"""
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -137,11 +137,11 @@ def get_verification_result_html(success: bool, message: str) -> str:
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(
-    line_id: Annotated[str, Query(description="LINE user ID")],
+    line_sub: Annotated[str, Query(description="LINE sub (OIDC Subject Identifier)")],
     error: Annotated[str | None, Query()] = None,
     success: Annotated[str | None, Query()] = None,
 ) -> HTMLResponse:
-    return HTMLResponse(content=get_login_html(line_id, error, success))
+    return HTMLResponse(content=get_login_html(line_sub, error, success))
 
 
 @router.post("/request-magic-link", response_class=HTMLResponse)
@@ -152,20 +152,20 @@ async def request_magic_link(
 ) -> HTMLResponse:
     form_data = await request.form()
     email = str(form_data.get("email", "")).strip().lower()
-    line_user_id = str(form_data.get("line_user_id", "")).strip()
-    
-    if not email or not line_user_id:
-        return HTMLResponse(content=get_login_html(line_user_id, error="請填寫電子郵件"), status_code=400)
-    
+    line_sub = str(form_data.get("line_sub", "")).strip()
+
+    if not email or not line_sub:
+        return HTMLResponse(content=get_login_html(line_sub, error="請填寫電子郵件"), status_code=400)
+
     try:
-        await auth_service.initiate_magic_link(email, line_user_id)
-        return HTMLResponse(content=get_login_html(line_user_id, success=f"驗證連結已發送至 {email}"))
+        await auth_service.initiate_magic_link(email, line_sub)
+        return HTMLResponse(content=get_login_html(line_sub, success=f"驗證連結已發送至 {email}"))
     except EmailNotFoundError as e:
-        return HTMLResponse(content=get_login_html(line_user_id, error=str(e)), status_code=400)
+        return HTMLResponse(content=get_login_html(line_sub, error=str(e)), status_code=400)
     except EmailSendError:
-        return HTMLResponse(content=get_login_html(line_user_id, error="發送郵件失敗"), status_code=500)
+        return HTMLResponse(content=get_login_html(line_sub, error="發送郵件失敗"), status_code=500)
     except Exception:
-        return HTMLResponse(content=get_login_html(line_user_id, error="發生錯誤"), status_code=500)
+        return HTMLResponse(content=get_login_html(line_sub, error="發生錯誤"), status_code=500)
 
 
 @router.get("/verify", response_class=HTMLResponse)
@@ -189,14 +189,14 @@ async def verify_magic_link(
         return HTMLResponse(content=get_verification_result_html(False, "發生錯誤"), status_code=500)
 
 
-@router.post("/api/request-magic-link", response_model=MagicLinkResponse)
+@router.post("/magic-link", response_model=MagicLinkResponse)
 async def api_request_magic_link(
     request_data: MagicLinkRequest,
     db: Annotated[AsyncSession, Depends(get_db_session)],
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> MagicLinkResponse:
     try:
-        await auth_service.initiate_magic_link(request_data.email, request_data.line_user_id)
+        await auth_service.initiate_magic_link(request_data.email, request_data.line_sub)
         return MagicLinkResponse(message="Verification email sent", email_sent_to=request_data.email)
     except EmailNotFoundError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -225,11 +225,11 @@ async def api_verify_token(
 async def get_user_stats(db: Annotated[AsyncSession, Depends(get_db_session)]) -> dict:
     from sqlalchemy import func, select
     from core.models import User
-    
+
     total_result = await db.execute(select(func.count(User.id)))
     total = total_result.scalar() or 0
-    
+
     active_result = await db.execute(select(func.count(User.id)).where(User.is_active == True))
     active = active_result.scalar() or 0
-    
+
     return {"total_users": total, "active_users": active}

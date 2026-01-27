@@ -14,6 +14,10 @@ from core.services.auth import (
     TokenAlreadyUsedError,
     TokenExpiredError,
     TokenInvalidError,
+    LineIdTokenError,
+    LineIdTokenExpiredError,
+    LineIdTokenInvalidError,
+    AccountNotBoundError,
     get_auth_service,
 )
 from core.services.auth_token import (
@@ -35,6 +39,11 @@ __all__ = [
     "TokenAlreadyUsedError",
     "TokenExpiredError",
     "TokenInvalidError",
+    # LINE ID Token Auth
+    "LineIdTokenError",
+    "LineIdTokenExpiredError",
+    "LineIdTokenInvalidError",
+    "AccountNotBoundError",
     "get_auth_service",
     # Token
     "MagicLinkPayload",

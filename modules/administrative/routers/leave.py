@@ -2,9 +2,11 @@
 Leave Request API Router.
 
 Endpoints for leave request initialization and submission.
+Uses LINE ID Token (OIDC) with sub-based authentication and Magic Link binding.
 """
 
 import logging
+import os
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
@@ -12,7 +14,15 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db_session
-from core.services import AuthError
+from core.services import (
+    AuthService,
+    AuthError,
+    LineIdTokenError,
+    LineIdTokenExpiredError,
+    LineIdTokenInvalidError,
+    AccountNotBoundError,
+    get_auth_service,
+)
 from modules.administrative.services.leave import (
     LeaveService,
     get_leave_service,
@@ -65,26 +75,115 @@ class ErrorResponse(BaseModel):
 # Dependencies
 # =============================================================================
 
-async def get_line_user_id(
+# Environment flag to skip authentication for development/testing
+DEBUG_SKIP_AUTH = os.environ.get(
+    "DEBUG_SKIP_AUTH", "").lower() in ("true", "1", "yes")
+
+
+async def get_current_user_email(
+    x_line_id_token: Annotated[str | None,
+                               Header(alias="X-Line-ID-Token")] = None,
     x_line_user_id: Annotated[str | None,
-                              Header(alias="X-Line-User-ID")] = None,
-    line_user_id: str | None = None,  # Query param fallback
+                              Header(alias="X-Line-User-Id")] = None,
+    authorization: Annotated[str | None, Header()] = None,
+    auth_service: AuthService = Depends(get_auth_service),
+    db: AsyncSession = Depends(get_db_session),
 ) -> str:
     """
-    Extract LINE User ID from header or query parameter.
+    Extract and verify LINE identity to get user's bound company email.
 
-    Priority: Header > Query param
+    Authentication methods (in order of preference):
+    1. X-Line-User-Id header - Direct lookup by LINE userId from LIFF profile
+    2. X-Line-ID-Token header - Verify LINE ID Token and extract sub
+    3. Authorization: Bearer <token> header - Fallback for ID Token
 
-    In production, this should come from a signed LIFF token.
-    For development, we accept it directly.
+    The X-Line-User-Id method is preferred for LIFF apps because:
+    - The userId from liff.getProfile() matches the webhook userId
+    - This ensures consistency with the binding created via webhook
+
+    Returns:
+        str: User's bound company email.
+
+    Raises:
+        HTTPException 401: If authentication fails.
+        HTTPException 403: If account is not bound to a company email.
     """
-    user_id = x_line_user_id or line_user_id
-    if not user_id:
+    # Development mode bypass
+    if DEBUG_SKIP_AUTH:
+        logger.warning("[DEV MODE] Skipping LINE authentication")
+        return "test@example.com"
+
+    # Method 1: Direct lookup by LINE User ID (from LIFF profile)
+    if x_line_user_id:
+        logger.info(
+            f"Authenticating via LINE User ID: {x_line_user_id[:8]}...")
+        bound_email = await auth_service.get_bound_email_by_line_sub(x_line_user_id, db)
+
+        if bound_email:
+            logger.info(f"User authenticated via LINE User ID: {bound_email}")
+            return bound_email
+        else:
+            # Account not bound
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "account_not_bound",
+                    "message": "您的 LINE 帳號尚未綁定公司信箱，請先完成綁定。",
+                    "line_sub": x_line_user_id,
+                    "line_name": None,
+                },
+            )
+
+    # Method 2: Verify LINE ID Token
+    id_token = x_line_id_token
+    if not id_token and authorization:
+        if authorization.startswith("Bearer "):
+            id_token = authorization[7:]
+
+    if not id_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="LINE User ID is required. Provide via X-Line-User-ID header or line_user_id query param.",
+            detail="LINE authentication required. Provide X-Line-User-Id or X-Line-ID-Token header.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    return user_id
+
+    try:
+        binding_status = await auth_service.check_binding_status(id_token, db)
+
+        if not binding_status["is_bound"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "account_not_bound",
+                    "message": "您的 LINE 帳號尚未綁定公司信箱，請先完成綁定。",
+                    "line_sub": binding_status["sub"],
+                    "line_name": binding_status.get("line_name"),
+                },
+            )
+
+        return binding_status["email"]
+
+    except LineIdTokenExpiredError as e:
+        logger.warning(f"LINE ID Token expired: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="LINE ID Token has expired. Please re-authenticate.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except LineIdTokenInvalidError as e:
+        logger.warning(f"LINE ID Token invalid: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid LINE ID Token: {e}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except LineIdTokenError as e:
+        logger.error(f"LINE ID Token verification error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"LINE ID Token verification failed: {e}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 # =============================================================================
@@ -99,10 +198,10 @@ async def get_line_user_id(
         404: {"model": ErrorResponse, "description": "Employee not found"},
     },
     summary="Initialize leave request form",
-    description="Get employee data for pre-filling the leave request form.",
+    description="Get employee data for pre-filling the leave request form. Requires LINE ID Token authentication.",
 )
 async def get_leave_init(
-    line_user_id: Annotated[str, Depends(get_line_user_id)],
+    email: Annotated[str, Depends(get_current_user_email)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
     leave_service: Annotated[LeaveService, Depends(get_leave_service)],
 ) -> LeaveInitResponse:
@@ -111,29 +210,25 @@ async def get_leave_init(
 
     This endpoint is called by the LIFF app when the leave form is opened.
     It returns the authenticated user's profile for pre-filling the form.
+
+    Authentication is performed via LINE ID Token (OIDC), which provides
+    the user's verified email address.
     """
-    logger.info(f"Leave init requested for LINE user: {line_user_id}")
+    logger.info(f"Leave init requested for email: {email}")
     try:
-        data = await leave_service.get_init_data(line_user_id, db)
+        data = await leave_service.get_init_data(email, db)
         logger.info(
-            f"Leave init success for {line_user_id}: {data.get('name', 'N/A')}")
+            f"Leave init success for {email}: {data.get('name', 'N/A')}")
         return LeaveInitResponse(**data)
 
-    except AuthError as e:
-        logger.warning(f"Auth error for {line_user_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(e),
-        )
     except EmployeeNotFoundError as e:
-        logger.warning(f"Employee not found: {e}")
+        logger.warning(f"Employee not found for {email}: {e}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
         )
     except Exception as e:
-        logger.exception(
-            f"Unexpected error in leave init for {line_user_id}: {e}")
+        logger.exception(f"Unexpected error in leave init for {email}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Internal error: {str(e)}",
@@ -149,25 +244,29 @@ async def get_leave_init(
         502: {"model": ErrorResponse, "description": "Ragic API error"},
     },
     summary="Submit leave request",
-    description="Submit a leave request to Ragic.",
+    description="Submit a leave request to Ragic. Requires LINE ID Token authentication.",
 )
 async def submit_leave_request(
     request: LeaveSubmitRequest,
-    line_user_id: Annotated[str, Depends(get_line_user_id)],
+    email: Annotated[str, Depends(get_current_user_email)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
     leave_service: Annotated[LeaveService, Depends(get_leave_service)],
 ) -> LeaveSubmitResponse:
     """
     Submit a leave request.
 
+    Authentication is performed via LINE ID Token (OIDC), which provides
+    the user's verified email address.
+
     The backend automatically fills in:
     - Supervisor email (from employee cache)
     - Department manager email (from department cache)
     - Source flag ("LINE_API")
     """
+    logger.info(f"Leave submission requested for email: {email}")
     try:
         result = await leave_service.submit_leave_request(
-            line_user_id=line_user_id,
+            email=email,
             leave_date=request.leave_date,
             reason=request.reason,
             leave_type=request.leave_type,
@@ -181,13 +280,6 @@ async def submit_leave_request(
             ragic_id=result.get("ragic_id"),
             employee=result["employee"],
             date=result["date"],
-        )
-
-    except AuthError as e:
-        logger.warning(f"Auth error during submission: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(e),
         )
     except EmployeeNotFoundError as e:
         logger.warning(f"Employee not found during submission: {e}")

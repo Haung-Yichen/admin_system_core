@@ -158,15 +158,17 @@ class SOPDocument(Base, TimestampMixin):
 
 **位置**: `core.services.AuthService`
 
-本模組使用核心提供的 AuthService 來檢查使用者是否已綁定 LINE 帳號。
+本模組使用核心提供的 AuthService 來驗證 LINE ID Token 並檢查帳號綁定狀態。
 
 ```python
 from core.services import get_auth_service
 
 auth_service = get_auth_service()
 
-# 檢查使用者是否已驗證
-is_auth = await auth_service.is_user_authenticated(line_user_id, db)
+# 驗證 ID Token 並檢查綁定狀態
+result = await auth_service.check_binding_status(id_token, db)
+if result["is_bound"]:
+    email = result["email"]  # 已綁定的公司信箱
 ```
 
 ### VectorService (Module)

@@ -42,11 +42,36 @@ async def serve_leave_form() -> FileResponse:
             status_code=404,
         )
 
-    return FileResponse(
+    # Add no-store headers to prevent caching issues during dev
+    response = FileResponse(
         path=html_path,
         media_type="text/html",
-        filename="leave_form.html",
     )
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
+@router.get(
+    "/leave_form.js",
+    response_class=FileResponse,
+    summary="Leave Form Script",
+    description="Serve the JS for leave form."
+)
+async def serve_leave_form_js() -> FileResponse:
+    js_path = STATIC_DIR / "leave_form.js"
+    if not js_path.exists():
+        return HTMLResponse(content="console.error('JS Not Found');", status_code=404)
+
+    response = FileResponse(
+        path=js_path,
+        media_type="application/javascript",
+    )
+    # Prevent caching for dev
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Content-Disposition"] = "inline"
+    return response
 
 
 @router.get(

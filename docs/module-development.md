@@ -144,23 +144,28 @@ class ChatbotModule(IAppModule):
 
 ### 5. 身分驗證 (Authentication)
 
-模組可透過框架 `AuthService` 檢查使用者是否已綁定 LINE 帳號：
+模組可透過框架 `AuthService` 使用 LINE ID Token (OIDC) 驗證並檢查帳號綁定狀態：
 
 ```python
 from core.services import get_auth_service
 from core.database.session import get_thread_local_session
 
-async def check_user(line_user_id: str):
+async def check_user_binding(id_token: str):
+    """檢查 LINE ID Token 對應的帳號是否已綁定公司信箱"""
     auth_service = get_auth_service()
     async with get_thread_local_session() as db:
-        is_auth = await auth_service.is_user_authenticated(line_user_id, db)
-        if is_auth:
-            user = await auth_service.get_user_by_line_id(line_user_id, db)
-            print(f"User email: {user.email}")
+        # 驗證 ID Token 並檢查綁定狀態
+        result = await auth_service.check_binding_status(id_token, db)
+        if result["is_bound"]:
+            print(f"User email: {result['email']}")
+        else:
+            # 尚未綁定，需引導使用者進行 Magic Link 綁定
+            print(f"LINE sub {result['sub']} not bound yet")
 ```
 
 > [!IMPORTANT]
 > 模組不應自行實作認證邏輯。所有 Magic Link 相關流程由 `/auth/*` 端點處理。
+> 認證使用 LINE ID Token 的 `sub` claim 作為穩定身份識別（跨 channel 一致）。
 
 ### 6. LINE Bot 整合 (Optional)
 

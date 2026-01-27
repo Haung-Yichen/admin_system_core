@@ -3,6 +3,11 @@ Core User Models.
 
 Defines system-wide user identity models for authentication.
 Used across all modules for user verification and session tracking.
+
+Identity Strategy:
+    - LINE user ID (from Messaging API) is used as the LINE identity
+    - For LIFF apps, LINE ID Token 'sub' claim can also be used
+    - Company email is bound via Magic Link verification
 """
 
 from datetime import datetime
@@ -17,26 +22,32 @@ from core.security import EncryptedType
 class User(Base, TimestampMixin):
     """
     User model representing authenticated employees.
-    
+
+    Identity Binding:
+        LINE user ID <-> Company Email (Ragic)
+
+    The `line_user_id` is the LINE user identifier from webhook events
+    or OIDC 'sub' claim from LINE ID Token.
+
     Attributes:
         id: UUID primary key.
-        line_user_id: Unique LINE user identifier for message routing.
-        email: Employee email address (verified via Ragic).
+        line_user_id: LINE user identifier (from webhook or OIDC sub).
+        email: Company email address (verified via Magic Link + Ragic).
         ragic_employee_id: Reference ID from Ragic database.
         display_name: User's display name from LINE profile.
         is_active: Whether the user account is active.
         last_login_at: Timestamp of last successful authentication.
     """
-    
+
     __tablename__ = "users"
-    
+
     id: Mapped[UUIDPrimaryKey]
-    
-    # Encrypted fields with blind indexes for lookups
+
+    # LINE Identity - user ID from webhook or 'sub' claim from ID Token
     line_user_id: Mapped[str] = mapped_column(
         EncryptedType(512),
         nullable=False,
-        comment="LINE platform user ID (Encrypted)",
+        comment="LINE user ID or OIDC Subject ID (Encrypted)",
     )
     line_user_id_hash: Mapped[str] = mapped_column(
         String(64),
@@ -45,11 +56,12 @@ class User(Base, TimestampMixin):
         nullable=False,
         comment="HMAC-SHA256 hash of line_user_id for lookups",
     )
-    
+
+    # Company email (verified via Magic Link)
     email: Mapped[str] = mapped_column(
         EncryptedType(512),
         nullable=False,
-        comment="Verified employee email (Encrypted)",
+        comment="Verified company email from Ragic (Encrypted)",
     )
     email_hash: Mapped[str] = mapped_column(
         String(64),
@@ -58,7 +70,7 @@ class User(Base, TimestampMixin):
         nullable=False,
         comment="HMAC-SHA256 hash of email for lookups",
     )
-    
+
     ragic_employee_id: Mapped[str | None] = mapped_column(
         EncryptedType(512),
         nullable=True,
@@ -69,7 +81,7 @@ class User(Base, TimestampMixin):
         nullable=True,
         comment="User display name from LINE (Encrypted)",
     )
-    
+
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
@@ -81,7 +93,7 @@ class User(Base, TimestampMixin):
         nullable=True,
         comment="Last successful login timestamp",
     )
-    
+
     def __repr__(self) -> str:
         return f"<User(id={self.id}, email={self.email}, line_user_id={self.line_user_id})>"
 
@@ -89,10 +101,10 @@ class User(Base, TimestampMixin):
 class UsedToken(Base):
     """
     Model for tracking used magic link tokens (one-time use enforcement).
-    
+
     Stores the token hash (not the token itself) to prevent reuse.
     Tokens are automatically cleaned up after expiration.
-    
+
     Attributes:
         id: UUID primary key.
         token_hash: SHA256 hash of the JWT token.
@@ -100,9 +112,9 @@ class UsedToken(Base):
         used_at: When the token was used.
         expires_at: When the token expires (for cleanup).
     """
-    
+
     __tablename__ = "used_tokens"
-    
+
     id: Mapped[UUIDPrimaryKey]
     token_hash: Mapped[str] = mapped_column(
         String(64),  # SHA256 hex = 64 chars
@@ -127,6 +139,6 @@ class UsedToken(Base):
         index=True,
         comment="Token expiration time (for cleanup)",
     )
-    
+
     def __repr__(self) -> str:
         return f"<UsedToken(hash={self.token_hash[:8]}..., email={self.email})>"
