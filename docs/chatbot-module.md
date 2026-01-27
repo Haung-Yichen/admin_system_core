@@ -24,18 +24,12 @@ modules/chatbot/
 ├── core/
 │   ├── __init__.py
 │   ├── config.py            # 模組配置 (SOP_BOT_ 環境變數)
-│   ├── rate_limiter.py      # API 速率限制
-│   └── security.py          # JWT 簽名與驗證
-├── db/
-│   ├── __init__.py
-│   ├── base.py              # SQLAlchemy Base 與 Mixins
-│   └── session.py           # 資料庫連線管理
+│   └── rate_limiter.py      # API 速率限制
 ├── models/
 │   ├── __init__.py
-│   └── models.py            # ORM 模型 (User, SOPDocument, UsedToken)
+│   └── models.py            # ORM 模型 (SOPDocument) - *User 已移至 Core*
 ├── routers/
 │   ├── __init__.py          # 匯出所有 routers
-│   ├── auth.py              # /auth/* 認證端點
 │   ├── bot.py               # /webhook LINE Bot 端點
 │   └── sop.py               # /sop/* SOP 管理端點
 ├── schemas/
@@ -43,10 +37,8 @@ modules/chatbot/
 │   └── schemas.py           # Pydantic DTOs
 ├── services/
 │   ├── __init__.py          # 匯出所有 services
-│   ├── auth_service.py      # Magic Link 認證邏輯
 │   ├── json_import_service.py  # JSON 匯入 SOP
 │   ├── line_service.py      # LINE Messaging API
-│   ├── ragic_service.py     # Ragic 員工資料查詢
 │   └── vector_service.py    # 向量嵌入與搜尋
 ├── data/
 │   └── sop_samples.json     # SOP 範例資料
@@ -70,8 +62,7 @@ class ChatbotModule(IAppModule):
     def on_entry(self, context: Any) -> None:
         # 初始化 API routers
         self._api_router = APIRouter()
-        self._api_router.include_router(auth_router)
-        self._api_router.include_router(bot_router)
+        # 注意: Auth Router 與 Webhook Router 現由框架統一處理
         self._api_router.include_router(sop_router)
 
     def get_api_router(self) -> Optional[APIRouter]:
@@ -100,35 +91,13 @@ class ChatbotSettings(BaseSettings):
         validation_alias="SOP_BOT_LINE_CHANNEL_ACCESS_TOKEN"
     )
 
-    # Ragic 設定
-    ragic_employee_sheet_path: str = "/HSIBAdmSys/-3/4"
-    ragic_field_email: str = "1000381"
-
     # 向量嵌入
     embedding_dimension: int = 384  # MiniLM
-
-    # Magic Link
-    magic_link_expire_minutes: int = 15
 ```
 
 ---
 
 ## 資料模型
-
-### User (使用者)
-
-```python
-class User(Base, TimestampMixin):
-    __tablename__ = "users"
-
-    id: Mapped[UUID]
-    line_user_id: Mapped[str]      # LINE 使用者 ID
-    email: Mapped[str]             # 已驗證的 Email
-    ragic_employee_id: Mapped[str] # Ragic 員工 ID
-    display_name: Mapped[str]      # LINE 顯示名稱
-    is_active: Mapped[bool]
-    last_login_at: Mapped[datetime]
-```
 
 ### SOPDocument (SOP 文件)
 
@@ -138,7 +107,7 @@ class SOPDocument(Base, TimestampMixin):
 
     id: Mapped[UUID]
     title: Mapped[str]
-    content: Mapped[str]
+    content: Mapped[str]         # EncryptedType
     embedding: Mapped[Vector(384)]  # pgvector
     category: Mapped[str]
     tags: Mapped[list[str]]         # JSONB
@@ -155,37 +124,19 @@ class SOPDocument(Base, TimestampMixin):
     )
 ```
 
-### UsedToken (已使用的 Token)
-
-防止 Magic Link Token 重複使用：
-
-```python
-class UsedToken(Base):
-    __tablename__ = "used_tokens"
-
-    token_hash: Mapped[str]  # SHA256 hash
-    email: Mapped[str]
-    used_at: Mapped[datetime]
-    expires_at: Mapped[datetime]
-```
+> [!NOTE]
+> **User (使用者) 與 UsedToken 模型** 已移至核心框架 (`core.models`) 統一維護。
+> 模組透過 `core.services.AuthService` 進行互動。
 
 ---
 
 ## API 端點
 
-### 認證 (`/auth`)
-
-| 方法 | 路徑 | 說明 |
-|------|------|------|
-| POST | `/auth/magic-link` | 發送 Magic Link Email |
-| GET  | `/auth/verify` | 驗證 Token 並綁定 LINE 帳號 |
-| GET  | `/auth/status/{line_user_id}` | 查詢認證狀態 |
-
 ### LINE Bot (`/webhook`)
 
 | 方法 | 路徑 | 說明 |
 |------|------|------|
-| POST | `/webhook/line` | LINE Webhook 接收訊息 |
+| POST | `/webhook/line/chatbot` | 框架統一處理 Webhook 並分派至模組 |
 
 ### SOP 管理 (`/sop`)
 
@@ -203,23 +154,22 @@ class UsedToken(Base):
 
 ## Services
 
-### AuthService
+### AuthService (Core)
 
-處理 Magic Link 認證流程：
+**位置**: `core.services.AuthService`
+
+本模組使用核心提供的 AuthService 來檢查使用者是否已綁定 LINE 帳號。
 
 ```python
-from modules.chatbot.services import get_auth_service
+from core.services import get_auth_service
 
 auth_service = get_auth_service()
 
-# 發送 Magic Link
-await auth_service.send_magic_link(email, line_user_id)
-
-# 驗證 Token
-user = await auth_service.verify_token(token)
+# 檢查使用者是否已驗證
+is_auth = await auth_service.is_user_authenticated(line_user_id, db)
 ```
 
-### VectorService
+### VectorService (Module)
 
 向量嵌入與語意搜尋：
 
@@ -236,18 +186,11 @@ results = await vector_service.search(
 )
 ```
 
-### RagicService
+### RagicService (Core)
 
-員工資料驗證：
+**位置**: `core.services.RagicService`
 
-```python
-from modules.chatbot.services import get_ragic_service
-
-ragic_service = get_ragic_service()
-
-# 查詢員工 Email
-employee = await ragic_service.find_by_email("user@example.com")
-```
+員工資料驗證已由核心統一處理。
 
 ---
 

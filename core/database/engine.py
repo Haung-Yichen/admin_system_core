@@ -18,6 +18,15 @@ _engine: AsyncEngine | None = None
 _thread_local = threading.local()
 
 
+
+def _get_ssl_context():
+    """Create a permissive SSL context for database connections."""
+    import ssl
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
 def get_engine(debug: bool = False) -> AsyncEngine:
     """
     Get or create the async database engine (singleton).
@@ -34,16 +43,16 @@ def get_engine(debug: bool = False) -> AsyncEngine:
         config_loader = ConfigLoader()
         config_loader.load()
         database_url = config_loader.get("database.url", "")
-        app_debug = config_loader.get("app.debug", False)
+        # app_debug = config_loader.get("app.debug", False) # Unused variable
 
         _engine = create_async_engine(
             str(database_url),
-            echo=False, # Force disabled to prevent vector log spam
+            echo=False,  # Force disabled to prevent vector log spam
             pool_pre_ping=True,
-            pool_size=10,
-            max_overflow=20,
+            pool_size=20,  # Increased from 10 for high concurrency (100 users)
+            max_overflow=40,  # Increased from 20 for burst traffic
             connect_args={
-                "ssl": "require",  # Require SSL/TLS encryption
+                "ssl": _get_ssl_context(),  # Use permissive SSL context
             },
         )
 
@@ -79,7 +88,7 @@ def get_thread_local_engine() -> AsyncEngine:
             pool_size=2,  # Smaller pool for background threads
             max_overflow=0,
             connect_args={
-                "ssl": "require",  # Require SSL/TLS encryption
+                "ssl": _get_ssl_context(),  # Use permissive SSL context
             },
         )
 
@@ -98,3 +107,14 @@ async def close_engine() -> None:
         await _engine.dispose()
         _engine = None
 
+
+async def dispose_thread_local_engine() -> None:
+    """
+    Dispose the thread-local engine if it exists.
+    
+    This must be called before closing the event loop in a background thread
+    to ensure all asyncpg connections are closed properly.
+    """
+    if hasattr(_thread_local, "engine") and _thread_local.engine is not None:
+        await _thread_local.engine.dispose()
+        _thread_local.engine = None

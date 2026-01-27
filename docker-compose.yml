@@ -6,31 +6,7 @@
 version: "3.8"
 
 services:
-  # ---------------------------------------------------------------------------
-  # Application
-  # ---------------------------------------------------------------------------
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: admin-system-core
-    ports:
-      - "8000:8000"
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/hsib_sop_bot
-    env_file:
-      - .env
-    depends_on:
-      db:
-        condition: service_healthy
-    volumes:
-      - ./core:/app/core:ro
-      - ./modules:/app/modules:ro
-      - ./services:/app/services:ro
-      - ./api:/app/api:ro
-    restart: unless-stopped
-    networks:
-      - hsib-network
+
 
   # ---------------------------------------------------------------------------
   # PostgreSQL with pgvector

@@ -70,8 +70,10 @@ class AdminSystemApp:
             if hasattr(module, 'get_api_router'):
                 router = module.get_api_router()
                 if router is not None:
-                    self._server.add_router(router)
-                    self._context.log_event(f"Registered API router for module: {name}", "LOADER")
+                    # Mount all module routers under /api prefix
+                    # This ensures paths like /api/administrative/... and /api/sop/... work as expected
+                    self._server.add_router(router, prefix="/api")
+                    self._context.log_event(f"Registered API router for module: {name} at /api", "LOADER")
     
     def _load_modules(self) -> None:
         """Load all modules from the modules directory."""
@@ -123,6 +125,7 @@ class AdminSystemApp:
         """Clean shutdown of the application."""
         self._context.log_event("Shutting down...", "INFO")
         self._server.stop()
+        self._server.join(timeout=3.0)
         self._registry.shutdown_all()
     # Windows-specific: Add slight delay or dummy async call to let ProactorLoop finish
         import asyncio

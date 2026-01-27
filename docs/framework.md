@@ -49,6 +49,34 @@ Admin System Core 採用 **Modular Monolith (模組化單體)** 架構。
     *   **Line User ID**: 用於訊息推播與身份識別。
     *   **Email**: 與 Ragic 員工表進行對應。
     *   **加密保護**: 關鍵個資 (Email, Line ID, Name) 皆自動加密。
+*   **UsedToken Model**: 追蹤已使用的 Magic Link Token，防止重複使用。
+
+### 5. 核心服務 (Core Services)
+
+框架提供以下可供模組直接調用的服務：
+
+*   **路徑**: `core/services/`
+*   **AuthService**: Magic Link 驗證流程與 LINE 帳號綁定。
+    *   `get_auth_service()`: 取得 singleton 實例
+    *   `is_user_authenticated(line_user_id, db)`: 檢查使用者是否已驗證
+    *   `get_user_by_line_id(line_user_id, db)`: 取得使用者資料
+    *   `initiate_magic_link(email, line_user_id)`: 發送驗證信
+*   **RagicService**: 員工資料庫查詢。
+    *   `get_ragic_service()`: 取得 singleton 實例
+    *   `verify_email_exists(email)`: 驗證 Email 是否為有效員工
+
+### 6. 核心 API (Core API Endpoints)
+
+框架自動掛載以下端點，模組**不需**自行實作：
+
+| 路徑                   | 方法 | 說明                       |
+| ---------------------- | ---- | -------------------------- |
+| `/auth/login`          | GET  | Magic Link 登入頁面 (HTML) |
+| `/auth/login`          | POST | 發送驗證信 (Form)          |
+| `/auth/verify`         | GET  | 驗證 Token 並綁定帳號      |
+| `/auth/api/magic-link` | POST | 發送驗證信 (JSON API)      |
+| `/auth/api/verify`     | POST | 驗證 Token (JSON API)      |
+| `/auth/stats`          | GET  | 使用者統計                 |
 
 ---
 

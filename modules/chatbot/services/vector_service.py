@@ -4,6 +4,7 @@ Vector Service Module.
 Handles embedding generation and vector similarity search.
 """
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -165,7 +166,8 @@ class VectorService:
             f"Searching: '{processed_query}' (top_k={top_k}, threshold={similarity_threshold})")
 
         try:
-            query_embedding = self.generate_embedding(processed_query)
+            # Offload CPU-intensive embedding to thread pool to avoid blocking event loop
+            query_embedding = await asyncio.to_thread(self.generate_embedding, processed_query)
             results = await self._execute_vector_search(
                 db=db,
                 query_embedding=query_embedding,
@@ -286,7 +288,8 @@ class VectorService:
         text_to_embed = f"{document.title}\n\n{document.content}"
         logger.info(
             f"Indexing: {document.title[:50]}... (length={len(text_to_embed)})")
-        embedding = self.generate_embedding(text_to_embed)
+        # Offload CPU-intensive embedding to thread pool to avoid blocking event loop
+        embedding = await asyncio.to_thread(self.generate_embedding, text_to_embed)
         document.embedding = embedding
 
     async def upsert_document(

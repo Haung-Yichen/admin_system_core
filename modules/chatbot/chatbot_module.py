@@ -4,6 +4,7 @@ Chatbot Module Entry Point.
 Implements IAppModule interface for integration with the admin system framework.
 """
 
+import asyncio
 import logging
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
@@ -140,6 +141,14 @@ class ChatbotModule(IAppModule):
             except Exception:
                 return None
 
+        # Store reference to main event loop for thread-safe scheduling
+        try:
+            main_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            main_loop = None
+            logger.warning(
+                "No running event loop found, file watcher will use thread-local loop")
+
         def sync_file_to_db():
             """Sync JSON file content to database."""
             import asyncio
@@ -164,9 +173,6 @@ class ChatbotModule(IAppModule):
             self._last_file_hash = current_hash
             logger.info("sop_samples.json changed, syncing to database...")
 
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
             async def do_sync():
                 try:
                     with open(json_path, "r", encoding="utf-8") as f:
@@ -183,14 +189,15 @@ class ChatbotModule(IAppModule):
                         original_id = item.get("id")
 
                         # Check if document exists by original_id
-                        # Check if document exists by original_id
                         stmt = select(SOPDocument).where(
-                            SOPDocument.metadata_['original_id'].astext == original_id
+                            SOPDocument.metadata_[
+                                'original_id'].astext == original_id
                         )
                         result = await session.execute(stmt)
                         existing_doc = result.scalar_one_or_none()
 
                         text_to_embed = f"{item['title']}\n\n{item['content']}"
+                        # generate_embedding is CPU-bound, safe to call from any thread
                         embedding = vector_service.generate_embedding(
                             text_to_embed)
 
@@ -203,9 +210,10 @@ class ChatbotModule(IAppModule):
                             existing_doc.embedding = embedding
                             # metadata is JSONB, better to update copy
                             meta = dict(existing_doc.metadata_ or {})
-                            meta["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                            meta["updated_at"] = time.strftime(
+                                "%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                             existing_doc.metadata_ = meta
-                            
+
                             logger.info(f"Updated SOP: {item['title']}")
                         else:
                             # Insert new
@@ -227,7 +235,14 @@ class ChatbotModule(IAppModule):
                         f"Sync completed: {len(samples)} SOPs processed.")
 
             try:
-                loop.run_until_complete(do_sync())
+                # Use thread-local event loop and session to avoid cross-loop issues
+                # This is the safest approach for background threads
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(do_sync())
+                finally:
+                    loop.close()
             except Exception as e:
                 logger.warning(f"Failed to sync SOP data: {e}")
                 # Reset hash so next iteration will retry
@@ -275,10 +290,10 @@ class ChatbotModule(IAppModule):
     def get_line_bot_config(self) -> Optional[Dict[str, str]]:
         """
         Return LINE Bot configuration for framework-level webhook handling.
-        
+
         The framework uses this to verify webhook signatures before
         dispatching events to handle_line_event().
-        
+
         Returns:
             dict: LINE channel credentials from module settings.
         """
@@ -299,10 +314,10 @@ class ChatbotModule(IAppModule):
     ) -> Optional[Dict[str, Any]]:
         """
         Handle a LINE webhook event dispatched by the framework.
-        
+
         This is the main entry point for LINE event processing.
         The framework has already verified the webhook signature.
-        
+
         Args:
             event: A single LINE event (message, follow, postback, etc.)
             context: Application context for logging
@@ -311,13 +326,14 @@ class ChatbotModule(IAppModule):
         reply_token = event.get("replyToken")
         source = event.get("source", {})
         user_id = source.get("userId")
-        
+
         if not user_id:
             logger.warning("LINE event without userId, skipping")
             return {"status": "skipped", "reason": "no userId"}
-        
-        logger.info(f"Processing LINE event: {event_type} from user: {user_id}")
-        
+
+        logger.info(
+            f"Processing LINE event: {event_type} from user: {user_id}")
+
         try:
             if event_type == "follow":
                 await self._handle_follow_event(user_id, reply_token)
@@ -328,9 +344,9 @@ class ChatbotModule(IAppModule):
                     await self._handle_text_message(user_id, text, reply_token)
             else:
                 logger.debug(f"Unhandled LINE event type: {event_type}")
-            
+
             return {"status": "ok", "event_type": event_type}
-            
+
         except Exception as e:
             logger.error(f"Error handling LINE event: {e}")
             return {"status": "error", "error": str(e)}
@@ -339,18 +355,18 @@ class ChatbotModule(IAppModule):
         """Handle LINE follow event (user added the bot)."""
         if not reply_token:
             return
-        
+
         from core.database.session import get_thread_local_session
         from core.services import get_auth_service
         from modules.chatbot.services import get_line_service
         from modules.chatbot.routers.bot import create_auth_required_flex
-        
+
         line_service = get_line_service()
         auth_service = get_auth_service()
-        
+
         async with get_thread_local_session() as db:
             is_auth = await auth_service.is_user_authenticated(user_id, db)
-        
+
         if is_auth:
             await line_service.reply(reply_token, [
                 {"type": "text", "text": "👋 歡迎回來！您可以直接輸入問題查詢 SOP。"}
@@ -368,7 +384,7 @@ class ChatbotModule(IAppModule):
         """Handle LINE text message event (SOP search)."""
         if not reply_token:
             return
-        
+
         from core.database.session import get_thread_local_session
         from core.services import get_auth_service
         from modules.chatbot.services import get_line_service, get_vector_service
@@ -377,38 +393,40 @@ class ChatbotModule(IAppModule):
             create_sop_result_flex,
             create_no_result_flex,
         )
-        
+
         line_service = get_line_service()
         auth_service = get_auth_service()
         vector_service = get_vector_service()
-        
+
         async with get_thread_local_session() as db:
             is_auth = await auth_service.is_user_authenticated(user_id, db)
-            
+
             if not is_auth:
                 flex_content = create_auth_required_flex(user_id)
                 await line_service.reply(reply_token, [
                     {"type": "flex", "altText": "請先驗證身份", "contents": flex_content}
                 ])
                 return
-            
+
             try:
                 result = await vector_service.get_best_match(text, db)
-                
+
                 if result:
                     doc, similarity = result
                     flex_content = create_sop_result_flex(
                         doc.title, doc.content, similarity, doc.category
                     )
                     await line_service.reply(reply_token, [
-                        {"type": "flex", "altText": f"SOP: {doc.title}", "contents": flex_content}
+                        {"type": "flex", "altText": f"SOP: {doc.title}",
+                            "contents": flex_content}
                     ])
                 else:
                     flex_content = create_no_result_flex(text)
                     await line_service.reply(reply_token, [
-                        {"type": "flex", "altText": "找不到相關 SOP", "contents": flex_content}
+                        {"type": "flex", "altText": "找不到相關 SOP",
+                            "contents": flex_content}
                     ])
-                    
+
             except Exception as e:
                 logger.error(f"Search error: {e}")
                 await line_service.reply(reply_token, [

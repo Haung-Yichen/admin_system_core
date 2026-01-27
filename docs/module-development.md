@@ -77,11 +77,6 @@ async def background_job():
 
 對於敏感個資 (Email, 手機, ID)，**必須** 使用框架提供的加密欄位。
 
-```python
-from sqlalchemy.orm import Mapped, mapped_column
-from core.database.base import Base
-from core.security import EncryptedType
-
 > [!TIP]
 > 系統已內建 `User` 模型 (`core.models.User`) 處理員工身份與 LINE 綁定。除非您需要建立額外的會員或客戶資料，否則無需自行建立使用者表。
 
@@ -100,11 +95,24 @@ class Customer(Base):
     email: Mapped[str] = mapped_column(EncryptedType(512), nullable=False)
     phone: Mapped[str] = mapped_column(EncryptedType(256), nullable=True)
 ```
+
+若需對加密欄位進行**精確查詢**，使用 Blind Index：
+
+```python
+from core.security import generate_blind_index
+
+email_hash = generate_blind_index(email)
+result = await db.execute(
+    select(Customer).where(Customer.email_hash == email_hash)
+)
 ```
 
 ### 3. 設定管理 (Configuration)
 
 模組應定義專屬的 `Settings` 類別，並使用前綴隔離環境變數。
+
+> [!IMPORTANT]
+> 所有模組的設定值 (與 Secret) 應統一存放於專案根目錄的 `.env` 檔案中，框架會由 `core/app_context.py` 統一載入。不建議模組建立獨立的 `.env` 檔案。
 
 ```python
 # modules/chatbot/core/config.py
@@ -133,6 +141,50 @@ class ChatbotModule(IAppModule):
         # 啟動初始化邏輯...
         context.log_event("Chatbot module loaded", "INFO")
 ```
+
+### 5. 身分驗證 (Authentication)
+
+模組可透過框架 `AuthService` 檢查使用者是否已綁定 LINE 帳號：
+
+```python
+from core.services import get_auth_service
+from core.database.session import get_thread_local_session
+
+async def check_user(line_user_id: str):
+    auth_service = get_auth_service()
+    async with get_thread_local_session() as db:
+        is_auth = await auth_service.is_user_authenticated(line_user_id, db)
+        if is_auth:
+            user = await auth_service.get_user_by_line_id(line_user_id, db)
+            print(f"User email: {user.email}")
+```
+
+> [!IMPORTANT]
+> 模組不應自行實作認證邏輯。所有 Magic Link 相關流程由 `/auth/*` 端點處理。
+
+### 6. LINE Bot 整合 (Optional)
+
+若模組需處理 LINE Webhook，需實作兩個方法：
+
+```python
+class MyModule(IAppModule):
+    def get_line_bot_config(self) -> dict | None:
+        """回傳 LINE channel credentials"""
+        return {
+            "channel_secret": "...",
+            "channel_access_token": "..."
+        }
+    
+    async def handle_line_event(self, event: dict, context: AppContext) -> dict | None:
+        """處理單一 LINE 事件 (已通過簽章驗證)"""
+        event_type = event.get("type")
+        # ... 處理邏輯
+        return {"status": "ok"}
+```
+
+框架會自動：
+- 驗證 Webhook 簽章
+- 將事件分派至對應模組
 
 ---
 
