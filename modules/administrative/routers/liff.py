@@ -60,7 +60,12 @@ async def serve_leave_form() -> FileResponse:
     description="Serve the JS for leave form."
 )
 async def serve_leave_form_js() -> FileResponse:
-    js_path = STATIC_DIR / "leave_form.js"
+    # Serve the V5 version explicitly to ensure fresh code
+    js_path = STATIC_DIR / "leave_form_v5.js"
+    if not js_path.exists():
+        # Fallback if v5 missing
+        js_path = STATIC_DIR / "leave_form.js"
+        
     if not js_path.exists():
         return HTMLResponse(content="console.error('JS Not Found');", status_code=404)
 

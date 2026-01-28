@@ -9,7 +9,7 @@ import logging
 import os
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -85,6 +85,10 @@ async def get_current_user_email(
                                Header(alias="X-Line-ID-Token")] = None,
     x_line_user_id: Annotated[str | None,
                               Header(alias="X-Line-User-Id")] = None,
+    q_line_id_token: Annotated[str | None,
+                               Query(alias="line_id_token")] = None,
+    q_line_user_id: Annotated[str | None,
+                              Query(alias="line_user_id")] = None,
     authorization: Annotated[str | None, Header()] = None,
     auth_service: AuthService = Depends(get_auth_service),
     db: AsyncSession = Depends(get_db_session),
@@ -93,8 +97,8 @@ async def get_current_user_email(
     Extract and verify LINE identity to get user's bound company email.
 
     Authentication methods (in order of preference):
-    1. X-Line-User-Id header - Direct lookup by LINE userId from LIFF profile
-    2. X-Line-ID-Token header - Verify LINE ID Token and extract sub
+    1. X-Line-User-Id header or line_user_id query param - Direct lookup by LINE userId from LIFF profile
+    2. X-Line-ID-Token header or line_id_token query param - Verify LINE ID Token and extract sub
     3. Authorization: Bearer <token> header - Fallback for ID Token
 
     The X-Line-User-Id method is preferred for LIFF apps because:
@@ -113,11 +117,15 @@ async def get_current_user_email(
         logger.warning("[DEV MODE] Skipping LINE authentication")
         return "test@example.com"
 
+    # Consolidate inputs (Header > Query)
+    user_id = x_line_user_id or q_line_user_id
+    id_token = x_line_id_token or q_line_id_token
+
     # Method 1: Direct lookup by LINE User ID (from LIFF profile)
-    if x_line_user_id:
+    if user_id:
         logger.info(
-            f"Authenticating via LINE User ID: {x_line_user_id[:8]}...")
-        bound_email = await auth_service.get_bound_email_by_line_sub(x_line_user_id, db)
+            f"Authenticating via LINE User ID: {user_id[:8]}...")
+        bound_email = await auth_service.get_bound_email_by_line_sub(user_id, db)
 
         if bound_email:
             logger.info(f"User authenticated via LINE User ID: {bound_email}")
@@ -129,13 +137,12 @@ async def get_current_user_email(
                 detail={
                     "error": "account_not_bound",
                     "message": "您的 LINE 帳號尚未綁定公司信箱，請先完成綁定。",
-                    "line_sub": x_line_user_id,
+                    "line_sub": user_id,
                     "line_name": None,
                 },
             )
 
     # Method 2: Verify LINE ID Token
-    id_token = x_line_id_token
     if not id_token and authorization:
         if authorization.startswith("Bearer "):
             id_token = authorization[7:]
@@ -143,7 +150,7 @@ async def get_current_user_email(
     if not id_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="LINE authentication required. Provide X-Line-User-Id or X-Line-ID-Token header.",
+            detail="LINE authentication required. Provide X-Line-User-Id or X-Line-ID-Token header/query.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
