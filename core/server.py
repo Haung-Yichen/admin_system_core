@@ -82,9 +82,9 @@ class FastAPIServer:
     def _register_routes(self, app: FastAPI) -> None:
         """Register API routes."""
 
-        # Register core authentication router
+        # Register core authentication router with /api prefix
         from core.api.auth import router as auth_router
-        app.include_router(auth_router)
+        app.include_router(auth_router, prefix="/api")
 
         @app.get("/")
         async def root() -> Dict[str, str]:

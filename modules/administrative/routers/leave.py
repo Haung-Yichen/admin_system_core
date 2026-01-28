@@ -57,6 +57,11 @@ class LeaveSubmitRequest(BaseModel):
     end_time: str | None = Field(default=None, description="End time (HH:MM)")
 
 
+class LeaveInitRequest(BaseModel):
+    """Request body for leave init (POST mode to avoid WebKit URL issues)."""
+    line_id_token: str = Field(..., description="LINE ID Token for authentication")
+
+
 class LeaveSubmitResponse(BaseModel):
     """Response for leave submission."""
     success: bool
@@ -83,12 +88,8 @@ DEBUG_SKIP_AUTH = os.environ.get(
 async def get_current_user_email(
     x_line_id_token: Annotated[str | None,
                                Header(alias="X-Line-ID-Token")] = None,
-    x_line_user_id: Annotated[str | None,
-                              Header(alias="X-Line-User-Id")] = None,
     q_line_id_token: Annotated[str | None,
                                Query(alias="line_id_token")] = None,
-    q_line_user_id: Annotated[str | None,
-                              Query(alias="line_user_id")] = None,
     authorization: Annotated[str | None, Header()] = None,
     auth_service: AuthService = Depends(get_auth_service),
     db: AsyncSession = Depends(get_db_session),
@@ -96,14 +97,13 @@ async def get_current_user_email(
     """
     Extract and verify LINE identity to get user's bound company email.
 
-    Authentication methods (in order of preference):
-    1. X-Line-User-Id header or line_user_id query param - Direct lookup by LINE userId from LIFF profile
-    2. X-Line-ID-Token header or line_id_token query param - Verify LINE ID Token and extract sub
-    3. Authorization: Bearer <token> header - Fallback for ID Token
+    Authentication method:
+    - X-Line-ID-Token header or line_id_token query param - Verify LINE ID Token and extract sub
+    - Authorization: Bearer <token> header - Fallback for ID Token
 
-    The X-Line-User-Id method is preferred for LIFF apps because:
-    - The userId from liff.getProfile() matches the webhook userId
-    - This ensures consistency with the binding created via webhook
+    The backend verifies the ID Token with LINE's API to securely extract
+    the user's identity (sub). This is more secure than trusting a user ID
+    directly from the frontend.
 
     Returns:
         str: User's bound company email.
@@ -118,31 +118,9 @@ async def get_current_user_email(
         return "test@example.com"
 
     # Consolidate inputs (Header > Query)
-    user_id = x_line_user_id or q_line_user_id
     id_token = x_line_id_token or q_line_id_token
 
-    # Method 1: Direct lookup by LINE User ID (from LIFF profile)
-    if user_id:
-        logger.info(
-            f"Authenticating via LINE User ID: {user_id[:8]}...")
-        bound_email = await auth_service.get_bound_email_by_line_sub(user_id, db)
-
-        if bound_email:
-            logger.info(f"User authenticated via LINE User ID: {bound_email}")
-            return bound_email
-        else:
-            # Account not bound
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={
-                    "error": "account_not_bound",
-                    "message": "您的 LINE 帳號尚未綁定公司信箱，請先完成綁定。",
-                    "line_sub": user_id,
-                    "line_name": None,
-                },
-            )
-
-    # Method 2: Verify LINE ID Token
+    # Fallback: Authorization Bearer header
     if not id_token and authorization:
         if authorization.startswith("Bearer "):
             id_token = authorization[7:]
@@ -150,9 +128,12 @@ async def get_current_user_email(
     if not id_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="LINE authentication required. Provide X-Line-User-Id or X-Line-ID-Token header/query.",
+            detail="LINE authentication required. Provide X-Line-ID-Token header or line_id_token query parameter.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Verify LINE ID Token with LINE's API and extract user identity
+    logger.info("Authenticating via LINE ID Token verification...")
 
     try:
         binding_status = await auth_service.check_binding_status(id_token, db)
@@ -197,6 +178,85 @@ async def get_current_user_email(
 # Endpoints
 # =============================================================================
 
+@router.post(
+    "/init",
+    response_model=LeaveInitResponse,
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated"},
+        404: {"model": ErrorResponse, "description": "Employee not found"},
+    },
+    summary="Initialize leave request form (POST)",
+    description="Get employee data for pre-filling the leave request form. Uses POST to avoid WebKit URL validation issues with long tokens.",
+)
+async def post_leave_init(
+    request: LeaveInitRequest,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    leave_service: Annotated[LeaveService, Depends(get_leave_service)],
+    auth_service: AuthService = Depends(get_auth_service),
+) -> LeaveInitResponse:
+    """
+    Get initialization data for leave request form (POST version).
+    
+    This endpoint accepts the LINE ID Token in the request body instead of
+    URL parameters, which avoids WebKit browser validation issues.
+    """
+    # TEMPORARY: Skip auth for testing
+    if DEBUG_SKIP_AUTH:
+        logger.warning("[DEV MODE] Skipping LINE authentication in POST /init")
+        email = "test@example.com"
+    else:
+        # Verify token and get email
+        id_token = request.line_id_token
+    
+        try:
+            binding_status = await auth_service.check_binding_status(id_token, db)
+            
+            if not binding_status["is_bound"]:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "error": "account_not_bound",
+                        "message": "您的 LINE 帳號尚未綁定公司信箱，請先完成綁定。",
+                        "line_sub": binding_status["sub"],
+                        "line_name": binding_status.get("line_name"),
+                    },
+                )
+            
+            email = binding_status["email"]
+            
+        except LineIdTokenExpiredError as e:
+            logger.warning(f"LINE ID Token expired: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="LINE ID Token has expired. Please re-authenticate.",
+            )
+        except (LineIdTokenInvalidError, LineIdTokenError) as e:
+            logger.warning(f"LINE ID Token error: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Invalid LINE ID Token: {e}",
+            )
+    
+    logger.info(f"Leave init (POST) requested for email: {email}")
+    try:
+        data = await leave_service.get_init_data(email, db)
+        logger.info(f"Leave init success for {email}: {data.get('name', 'N/A')}")
+        return LeaveInitResponse(**data)
+
+    except EmployeeNotFoundError as e:
+        logger.warning(f"Employee not found for {email}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+    except Exception as e:
+        logger.exception(f"Unexpected error in leave init for {email}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal error: {str(e)}",
+        )
+
+
 @router.get(
     "/init",
     response_model=LeaveInitResponse,
@@ -204,8 +264,9 @@ async def get_current_user_email(
         401: {"model": ErrorResponse, "description": "Not authenticated"},
         404: {"model": ErrorResponse, "description": "Employee not found"},
     },
-    summary="Initialize leave request form",
+    summary="Initialize leave request form (GET - deprecated)",
     description="Get employee data for pre-filling the leave request form. Requires LINE ID Token authentication.",
+    deprecated=True,
 )
 async def get_leave_init(
     email: Annotated[str, Depends(get_current_user_email)],

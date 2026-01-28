@@ -65,6 +65,7 @@ class ConfigLoader:
                 "similarity_threshold": float(os.getenv("SEARCH_SIMILARITY_THRESHOLD", "0.3"))
             },
             "line": {
+                "channel_id": os.getenv("LINE_CHANNEL_ID", ""),
                 "channel_secret": os.getenv("LINE_CHANNEL_SECRET", ""),
                 "channel_access_token": os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
             },

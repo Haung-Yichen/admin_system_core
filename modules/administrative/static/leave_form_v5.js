@@ -1,4 +1,4 @@
-// leave_form_v5.js - CACHE BUSTER VERSION
+// leave_form_v5.js - V6 SECURITY FIX (ID Token Only)
 // This file MUST be loaded externally to bypass CSP inline script blocks
 
 (function() {
@@ -16,7 +16,7 @@
     
     // Debug logging
     const debugLogs = [];
-    const DEBUG_MODE = true;
+    const DEBUG_MODE = false;
     
     function createDebugOverlay() {
         if (document.getElementById('debug-overlay')) return;
@@ -27,7 +27,7 @@
             background: rgba(0,0,0,0.85); color: #0f0; font-size: 11px; font-family: monospace;
             padding: 8px; border-radius: 8px; overflow-y: auto; z-index: 9999; display: ${DEBUG_MODE ? 'block' : 'none'};
         `;
-        overlay.innerHTML = '<div style="margin-bottom:4px;font-weight:bold;">Debug Console (v5) <button onclick="this.parentElement.style.display=\'none\'" style="float:right;background:#333;color:#fff;border:none;padding:2px 6px;cursor:pointer;">×</button></div><div id="debug-logs"></div>';
+        overlay.innerHTML = '<div style="margin-bottom:4px;font-weight:bold;">Debug Console (V6) <button onclick="this.parentElement.style.display=\'none\'" style="float:right;background:#333;color:#fff;border:none;padding:2px 6px;cursor:pointer;">×</button></div><div id="debug-logs"></div>';
         document.body.appendChild(overlay);
     }
     
@@ -35,7 +35,7 @@
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${msg}`;
         debugLogs.push(logEntry);
-        console.log(logEntry);
+        // console.log(logEntry);
         
         const loadingDebug = document.getElementById('loading-debug');
         if (loadingDebug) {
@@ -78,7 +78,7 @@
     // Initialize LIFF
     async function initializeLiff() {
         createDebugOverlay();
-        debugLog('Initializing... V5 (Query Params Mode)');
+        debugLog('Initializing... V6 (ID Token Only Mode)');
         
         const urlParams = new URLSearchParams(window.location.search);
         
@@ -105,7 +105,7 @@
                 const configResponse = await fetchWithTimeout(`${API_BASE_URL}/api/administrative/liff/config`);
                 if (configResponse.ok) {
                     const config = await configResponse.json();
-                    liffId = config.liff_id_leave;
+                    liffId = (config.liff_id_leave || '').trim();
                     debugLog('Loaded LIFF ID: ' + liffId);
                 } else {
                     debugLog('Config response not OK: ' + configResponse.status, true);
@@ -115,10 +115,28 @@
             }
             
             if (!liffId) {
-                // Fallback or error
-                debugLog('LIFF ID missing, trying default/env approach or continue without init check', true);
-            } else {
-                 await liff.init({ liffId: liffId });
+                debugLog('LIFF ID missing, cannot initialize LIFF', true);
+                showError('LIFF 設定缺失，請確認 ADMIN_LINE_LIFF_ID_LEAVE 已設定。');
+                return;
+            }
+
+            const liffIdPattern = /^\d+-[a-zA-Z0-9]+$/;
+            if (!liffIdPattern.test(liffId)) {
+                debugLog('Invalid LIFF ID format: ' + liffId, true);
+                showError('LIFF ID 格式錯誤，請確認設定值是否正確。');
+                return;
+            }
+
+            try {
+                await liff.init({ liffId: liffId });
+            } catch (initError) {
+                const initMessage = initError && initError.message ? initError.message : String(initError);
+                debugLog('LIFF init failed: ' + initMessage, true);
+                if (initMessage.toLowerCase().includes('pattern')) {
+                    showError('LIFF 初始化失敗：LIFF ID 或端點設定不符，請確認 LIFF App 的 Endpoint URL 與目前網址一致。');
+                    return;
+                }
+                throw initError;
             }
 
             // Check if logged in
@@ -169,27 +187,24 @@
     // Load user data from backend
     async function loadUserData() {
         try {
-            debugLog('Loading user data (V5)...');
+            debugLog('Loading user data (V6 - POST mode)...');
             
-            // V5 FIX: Use Query Parameters ONLY. NO HEADERS.
-            const params = new URLSearchParams();
-            
-            if (userId) {
-                params.append('line_user_id', userId);
+            // SECURITY FIX: Send ID Token in POST body to avoid WebKit URL validation issues
+            if (!idToken) {
+                debugLog('No ID Token available!', true);
+                showError('無法取得驗證權杖，請重新登入。');
+                return;
             }
             
-            if (idToken) {
-                params.append('line_id_token', idToken);
-            }
+            const targetUrl = `${API_BASE_URL}/api/administrative/leave/init`;
+            debugLog('Making API request to init (POST mode)');
             
-            const targetUrl = `${API_BASE_URL}/api/administrative/leave/init?${params.toString()}`;
-            debugLog(`Making API request to init (URL length: ${targetUrl.length})`);
-            
-            // Do NOT set Content-Type for GET request to be extra safe
             const response = await fetchWithTimeout(
                 targetUrl,
-                { 
-                    method: 'GET'
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ line_id_token: idToken })
                 }
             );
             
@@ -214,8 +229,16 @@
                 }
                 
                 if (response.status === 401) {
-                    let errorMsg = '身份驗證失敗。';
-                    showError(errorMsg);
+                    debugLog('Token expired or invalid, re-authenticating...', true);
+                    // Token expired - trigger re-login
+                    if (typeof liff !== 'undefined' && liff.isLoggedIn && liff.isLoggedIn()) {
+                        liff.logout();
+                    }
+                    if (typeof liff !== 'undefined' && liff.login) {
+                        liff.login();
+                    } else {
+                        showError('身份驗證已過期，請重新開啟此頁面。');
+                    }
                     return;
                 }
                 
@@ -259,10 +282,13 @@
                 reason: document.getElementById('reason').value,
             };
             
-            // V5 FIX: Use Query Parameters for Submit as well
+            // SECURITY FIX: Only send ID Token for authentication
             const params = new URLSearchParams();
-            if (userId) params.append('line_user_id', userId);
-            if (idToken) params.append('line_id_token', idToken);
+            if (idToken) {
+                params.append('line_id_token', idToken);
+            } else {
+                throw new Error('驗證權杖已失效，請重新整理頁面。');
+            }
             
             const targetUrl = `${API_BASE_URL}/api/administrative/leave/submit?${params.toString()}`;
             debugLog('Submitting form with query params...');
@@ -282,12 +308,12 @@
             }
             
             const result = await response.json();
-            console.log('Submission result:', result);
+            // console.log('Submission result:', result);
             
             showSuccess();
             
         } catch (error) {
-            console.error('Submit error:', error);
+            // console.error('Submit error:', error);
             debugLog('Submit error: ' + error.message, true);
             alert('送出失敗: ' + error.message);
             
@@ -423,13 +449,12 @@
     
     // Initialize on DOM ready
     async function init() {
-        console.log('[LEAVE_FORM] DOMContentLoaded - V5');
-        
+        // console.log('[LEAVE_FORM] DOMContentLoaded - V6');
+
         const loadingText = document.querySelector('.loading-text');
-        if (loadingText) loadingText.textContent = '系統初始化中... (V5)';
-        
+        if (loadingText) loadingText.textContent = '系統初始化中... (V6)';
         createDebugOverlay();
-        debugLog('DOM loaded, checking LIFF SDK (V5)...');
+        debugLog('DOM loaded, checking LIFF SDK (V6)...');
         debugLog('User Agent: ' + navigator.userAgent);
         
         // Wait for LIFF SDK (max 10 seconds)
@@ -453,8 +478,19 @@
         
         // Start LIFF initialization
         initializeLiff().catch(function(err) {
-            debugLog('initializeLiff error: ' + err.message, true);
-            showError('初始化失敗: ' + err.message);
+            const errMsg = err && err.message ? err.message : String(err);
+            debugLog('initializeLiff error: ' + errMsg, true);
+            if (errMsg.toLowerCase().includes('pattern')) {
+                showError(
+                    'LIFF 初始化失敗：URL/ID 格式不符。\n' +
+                    '請確認：\n' +
+                    '1) LINE Developers Console 的 LIFF Endpoint URL 與目前網址一致\n' +
+                    '2) ADMIN_LINE_LIFF_ID_LEAVE 設定正確且無多餘空白\n' +
+                    '3) LINE App 已更新到最新版'
+                );
+                return;
+            }
+            showError('初始化失敗: ' + errMsg);
         });
     }
     
@@ -467,7 +503,7 @@
     
     // Global error handler
     window.onerror = function(msg, url, line, col, error) {
-        console.error('[GLOBAL ERROR]', msg, url, line);
+        // console.error('[GLOBAL ERROR]', msg, url, line);
         if (typeof debugLog === 'function') {
             debugLog('JS Error: ' + msg, true);
         }

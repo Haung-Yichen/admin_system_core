@@ -95,7 +95,7 @@ async def get_liff_config() -> dict:
     settings = get_admin_settings()
 
     result = {
-        "liff_id_leave": settings.line_liff_id_leave,
+        "liff_id_leave": (settings.line_liff_id_leave or "").strip(),
     }
     logger.info(f"LIFF config returned: {result}")
     return result
