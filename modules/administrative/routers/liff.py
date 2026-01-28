@@ -65,7 +65,7 @@ async def serve_leave_form_js() -> FileResponse:
     if not js_path.exists():
         # Fallback if v5 missing
         js_path = STATIC_DIR / "leave_form.js"
-        
+
     if not js_path.exists():
         return HTMLResponse(content="console.error('JS Not Found');", status_code=404)
 
