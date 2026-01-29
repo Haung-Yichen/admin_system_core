@@ -1,158 +1,204 @@
 """
 Admin System Core - Entry Point.
-Initializes all components and starts the application.
-"""
-import sys
-import logging
-from typing import Dict, Any
 
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QTimer
+Headless ASGI application for uvicorn execution.
+Removed PyQt GUI dependencies.
+
+Usage:
+    uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+Or run directly:
+    python main.py
+"""
+
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import AsyncGenerator
+
+import uvicorn
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from core.app_context import AppContext
-from core.registry import ModuleRegistry, ModuleLoader
+from core.database import close_db_connections, init_database
+from core.logging_config import setup_logging
+from core.registry import ModuleLoader, ModuleRegistry
 from core.router import EventRouter, WebhookDispatcher
 from core.server import FastAPIServer
-from core.logging_config import setup_logging
-from gui.splash import AnimatedSplashScreen
-from gui.main_window import MainWindow
-from gui.tray_icon import SystemTrayManager
-from api.status_api import init_status_api
 
-# 模組目錄路徑
+# Module directory path
 MODULES_DIR = "modules"
 
 
-class AdminSystemApp:
-    """Main application orchestrator."""
-    
-    def __init__(self) -> None:
-        self._app = QApplication(sys.argv)
-        self._app.setQuitOnLastWindowClosed(False)
-        
-        # Core components
-        self._context = AppContext()
-        
-        # Connect logging to GUI
-        from core.logging_config import GUIHandler
-        GUIHandler.set_context(self._context)
-        
-        self._registry = ModuleRegistry()
-        self._registry.set_context(self._context)
-        
-        # Load modules from /modules directory
-        self._load_modules()
-        
-        # Router
-        self._router = EventRouter(self._registry, self._context)
-        self._webhook_dispatcher = WebhookDispatcher(self._router, self._context)
-        
-        # Server (注入 registry 以支援動態 LINE webhook 路由)
-        port = self._context.config.get("server.port", 8000)
-        self._server = FastAPIServer(self._context, port=port, registry=self._registry)
-        self._server.set_webhook_handler(self._handle_webhook)
-        
-        # Register module API routers
-        self._register_module_routers()
-        
-        # Add status API
-        status_router = init_status_api(self._context, self._registry)
-        self._server.add_router(status_router)
-        
-        # GUI (initialized later)
-        self._main_window: MainWindow = None  # type: ignore
-        self._tray: SystemTrayManager = None  # type: ignore
-        self._splash: AnimatedSplashScreen = None  # type: ignore
-    
-    def _register_module_routers(self) -> None:
-        """Register API routers from all modules that have get_api_router()."""
-        for name, module in self._registry._modules.items():
-            if hasattr(module, 'get_api_router'):
-                router = module.get_api_router()
-                if router is not None:
-                    # Mount all module routers under /api prefix
-                    # This ensures paths like /api/administrative/... and /api/sop/... work as expected
-                    self._server.add_router(router, prefix="/api")
-                    self._context.log_event(f"Registered API router for module: {name} at /api", "LOADER")
-    
-    def _load_modules(self) -> None:
-        """Load all modules from the modules directory."""
-        from pathlib import Path
-        modules_path = Path(__file__).parent / MODULES_DIR
-        
-        loader = ModuleLoader(self._registry)
-        count = loader.load_from_directory(str(modules_path))
-        self._context.log_event(f"Loaded {count} module(s) from {MODULES_DIR}/", "LOADER")
-    
-    def _handle_webhook(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+# -----------------------------------------------------------------------------
+# Application Factory
+# -----------------------------------------------------------------------------
+
+
+def create_app_context() -> AppContext:
+    """Create and configure the AppContext."""
+    return AppContext()
+
+
+def create_registry(context: AppContext) -> ModuleRegistry:
+    """Create and configure the ModuleRegistry with loaded modules."""
+    registry = ModuleRegistry()
+    registry.set_context(context)
+
+    # Load modules from /modules directory
+    modules_path = Path(__file__).parent / MODULES_DIR
+    loader = ModuleLoader(registry)
+    count = loader.load_from_directory(str(modules_path))
+    context.log_event(f"Loaded {count} module(s) from {MODULES_DIR}/", "LOADER")
+
+    return registry
+
+
+def create_fastapi_app(context: AppContext, registry: ModuleRegistry) -> FastAPI:
+    """Create the FastAPI application with all routers configured."""
+    from api.admin_auth import router as admin_auth_router
+    from api.status_api import init_status_api
+    from api.system import router as system_router, set_app_context, set_registry
+    from core.api.auth import router as auth_router
+
+    # Create FastAPIServer instance for webhook handling
+    port = context.config.get("server.port", 8000)
+    server = FastAPIServer(context, port=port, registry=registry)
+
+    # Create router and dispatcher for webhook handling
+    router = EventRouter(registry, context)
+    webhook_dispatcher = WebhookDispatcher(router, context)
+
+    def handle_webhook(payload: dict) -> dict:
         """Handle incoming webhook events."""
         if "events" in payload:  # LINE webhook
-            return self._webhook_dispatcher.dispatch_line_webhook(payload)
+            return webhook_dispatcher.dispatch_line_webhook(payload)
         else:
-            return self._router.route(payload)
-    
-    def _init_gui(self) -> None:
-        """Initialize GUI components after splash."""
-        self._main_window = MainWindow(self._context, self._registry)
-        self._tray = SystemTrayManager()
-        
-        # Connect signals
-        self._tray.show_window_requested.connect(self._show_main_window)
-        self._tray.exit_requested.connect(self._exit_app)
-        self._main_window.close_to_tray.connect(self._on_minimize_to_tray)
-        
-        # Start server
-        self._server.start()
-        self._tray.update_server_status(True, self._context.config.get("server.port", 8000))
-        
-        # Show GUI
-        self._tray.show()
-        self._main_window.show()
-        
-        self._context.log_event("Application started successfully", "SUCCESS")
-    
-    def _show_main_window(self) -> None:
-        """Show and activate the main window."""
-        self._main_window.show()
-        self._main_window.activateWindow()
-        self._main_window.raise_()
-    
-    def _on_minimize_to_tray(self) -> None:
-        """Handle minimize to tray event."""
-        self._tray.show_notification("Admin System", "Running in background")
-    
-    def _exit_app(self) -> None:
-        """Clean shutdown of the application."""
-        self._context.log_event("Shutting down...", "INFO")
-        self._server.stop()
-        self._server.join(timeout=3.0)
-        self._registry.shutdown_all()
-    # Windows-specific: Add slight delay or dummy async call to let ProactorLoop finish
-        import asyncio
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.stop()
-        except Exception:
-            pass
-            
-        self._app.quit()
+            return router.route(payload)
 
-    
-    def run(self) -> int:
-        """Run the application."""
-        # Show splash screen
-        self._splash = AnimatedSplashScreen()
-        self._splash.show_loading_sequence(self._init_gui)
-        
-        return self._app.exec()
+    server.set_webhook_handler(handle_webhook)
+
+    # Get the FastAPI app from server
+    app = server.app
+
+    # Set shared context and registry for system API
+    set_app_context(context)
+    set_registry(registry)
+
+    # Register admin auth router
+    app.include_router(admin_auth_router, prefix="/api")
+
+    # Register system router (protected by admin auth)
+    app.include_router(system_router, prefix="/api")
+
+    # Add status API
+    status_router = init_status_api(context, registry)
+    app.include_router(status_router)
+
+    # Register module API routers
+    for name, module in registry._modules.items():
+        if hasattr(module, "get_api_router"):
+            module_router = module.get_api_router()
+            if module_router is not None:
+                app.include_router(module_router, prefix="/api")
+                context.log_event(f"Registered API router for module: {name} at /api", "LOADER")
+
+    # Mount static files for web dashboard
+    static_dir = Path(__file__).parent / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    return app
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """
+    FastAPI lifespan context manager.
+
+    Handles startup and shutdown events.
+    """
+    logger = logging.getLogger(__name__)
+
+    # Startup
+    logger.info("Starting Admin System Core...")
+
+    try:
+        await init_database()
+        logger.info("Database initialized")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        raise
+
+    # Update server status
+    context = _context
+    if context:
+        context.set_server_status(True, context.config.get("server.port", 8000))
+        context.log_event("Application started successfully", "SUCCESS")
+
+    yield
+
+    # Shutdown
+    logger.info("Shutting down Admin System Core...")
+
+    if _registry:
+        _registry.shutdown_all()
+
+    await close_db_connections()
+    logger.info("Cleanup complete")
+
+
+# -----------------------------------------------------------------------------
+# Module-level Application Instance
+# -----------------------------------------------------------------------------
+
+# Setup logging first
+setup_logging()
+
+# Create core components
+_context = create_app_context()
+_registry = create_registry(_context)
+
+# Create FastAPI app with lifespan
+_app = create_fastapi_app(_context, _registry)
+_app.router.lifespan_context = lifespan
+
+# Export for uvicorn
+app = _app
+
+
+# -----------------------------------------------------------------------------
+# Direct Execution
+# -----------------------------------------------------------------------------
 
 
 def main() -> None:
-    """Application entry point."""
-    setup_logging()
-    app = AdminSystemApp()
-    sys.exit(app.run())
+    """Run the application directly with uvicorn."""
+    host = _context.config.get("server.host", "127.0.0.1")
+    port = _context.config.get("server.port", 8000)
+    debug = _context.config.get("app.debug", False)
+
+    uvicorn_config = {
+        "host": host,
+        "port": port,
+        "reload": debug,
+        "log_level": "info",
+    }
+
+    # If reload is enabled, exclude logs and cache directories
+    if debug:
+        uvicorn_config["reload_excludes"] = [
+            "logs/*",
+            "**/__pycache__/*",
+            "**/*.pyc",
+            ".venv/*",
+            "*.log",
+        ]
+
+    uvicorn.run("main:app", **uvicorn_config)
 
 
 if __name__ == "__main__":

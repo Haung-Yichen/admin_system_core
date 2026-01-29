@@ -12,6 +12,8 @@ from typing import Annotated
 from pydantic import Field, PostgresDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from core.ragic.columns import get_account_form
+
 
 class ChatbotSettings(BaseSettings):
     """
@@ -19,6 +21,8 @@ class ChatbotSettings(BaseSettings):
     
     All variables use the SOP_BOT_ prefix for module isolation.
     Sensitive values use SecretStr for security.
+    
+    Note: Ragic field IDs are now loaded from ragic_columns.json.
     """
 
     model_config = SettingsConfigDict(
@@ -49,31 +53,6 @@ class ChatbotSettings(BaseSettings):
         )
     ]
 
-    # Ragic - Unified Account Table
-    ragic_employee_sheet_path: Annotated[
-        str,
-        Field(
-            default="/HSIBAdmSys/ychn-test/11",
-            description="Ragic sheet path for unified Account table",
-            validation_alias="SOP_BOT_RAGIC_EMPLOYEE_SHEET_PATH"
-        )
-    ] = "/HSIBAdmSys/ychn-test/11"
-
-    ragic_field_email: Annotated[
-        str,
-        Field(default="1005977", validation_alias="SOP_BOT_RAGIC_FIELD_EMAIL")
-    ] = "1005977"
-
-    ragic_field_name: Annotated[
-        str,
-        Field(default="1005975", validation_alias="SOP_BOT_RAGIC_FIELD_NAME")
-    ] = "1005975"
-
-    ragic_field_door_access_id: Annotated[
-        str,
-        Field(default="1005983", validation_alias="SOP_BOT_RAGIC_FIELD_DOOR_ACCESS_ID")
-    ] = "1005983"
-
     # SOP Content Validation
     sop_content_max_length: Annotated[
         int,
@@ -91,6 +70,27 @@ class ChatbotSettings(BaseSettings):
         int,
         Field(default=15, description="Magic link expiration in minutes", validation_alias="SOP_BOT_MAGIC_LINK_EXPIRE_MINUTES")
     ] = 15
+
+    # === Ragic Config (loaded from ragic_columns.json) ===
+    @property
+    def ragic_employee_sheet_path(self) -> str:
+        """Ragic sheet path for unified Account table."""
+        return get_account_form().sheet_path
+
+    @property
+    def ragic_field_email(self) -> str:
+        """Ragic field ID for email."""
+        return get_account_form().field("EMAILS")
+
+    @property
+    def ragic_field_name(self) -> str:
+        """Ragic field ID for name."""
+        return get_account_form().field("NAME")
+
+    @property
+    def ragic_field_door_access_id(self) -> str:
+        """Ragic field ID for employee ID / door access ID."""
+        return get_account_form().field("EMPLOYEE_ID")
 
 
 @lru_cache

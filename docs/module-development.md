@@ -167,7 +167,39 @@ async def check_user_binding(id_token: str):
 > 模組不應自行實作認證邏輯。所有 Magic Link 相關流程由 `/auth/*` 端點處理。
 > 認證使用 LINE ID Token 的 `sub` claim 作為穩定身份識別（跨 channel 一致）。
 
-### 6. LINE Bot 整合 (Optional)
+### 6. Ragic 整合 (Ragic Integration)
+
+模組若需讀寫 Ragic 表單，請使用統一的 `core.ragic` 套件。
+
+#### 定義 Ragic Model
+```python
+from core.ragic import RagicModel, RagicField
+
+class LeaveRequest(RagicModel):
+    _sheet_path = "/HSIBAdmSys/forms/3"  # Ragic 表單路徑
+    
+    # 定義欄位映射 (Ragic Field ID -> Python 屬性)
+    employee_id: str = RagicField("1000001", "工號")
+    leave_type: str = RagicField("1000002", "假別")
+    days: int = RagicField("1000003", "天數", cast_func=int)
+```
+
+#### 使用 Repository
+```python
+from core.ragic import RagicRepository
+
+async def sync_leave_requests():
+    # 建立 Repository (由框架自動注入 RagicService)
+    repo = RagicRepository(LeaveRequest)
+    
+    # 查詢所有資料
+    requests = await repo.find_all()
+    
+    for req in requests:
+        print(f"Syncing leave for {req.employee_id}: {req.leave_type}")
+```
+
+### 7. LINE Bot 整合 (Optional)
 
 若模組需處理 LINE Webhook，需實作兩個方法：
 

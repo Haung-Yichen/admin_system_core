@@ -11,211 +11,202 @@ from typing import Annotated
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from core.ragic.columns import get_leave_form, get_leave_type_form, get_account_form
+
 
 class RagicLeaveFieldMapping:
     """
     Ragic Field ID mappings for the Leave Request form.
     
-    These constants map our payload attributes to Ragic field IDs.
-    Used for constructing the POST payload to create leave request records.
-    
-    Field Reference:
-        The Leave Request form at /HSIBAdmSys/ychn-test/3
-        Key Field: 1005578
-        Generated: 2026/01/28
+    Loads field IDs from the centralized ragic_columns.json file.
     """
     
+    _config = get_leave_form()
+    
     # === Employee Info ===
-    EMPLOYEE_NAME = "1005571"  # 姓名
-    EMPLOYEE_EMAIL = "1005579"  # 電子郵件信箱
-    SALES_DEPT = "1005572"  # 營業部
+    EMPLOYEE_NAME = _config.field("EMPLOYEE_NAME")
+    EMPLOYEE_EMAIL = _config.field("EMPLOYEE_EMAIL")
+    SALES_DEPT = _config.field("SALES_DEPT")
     
     # === Leave Details ===
-    LEAVE_TYPE = "1005565"  # 假別
-    START_DATE = "1005566"  # 起始日期
-    END_DATE = "1005567"  # 結束日期
-    LEAVE_DATE = "1005568"  # 請假日期
-    LEAVE_DAYS = "1005569"  # 請假天數
-    LEAVE_REASON = "1005570"  # 事由
+    LEAVE_TYPE = _config.field("LEAVE_TYPE")
+    START_DATE = _config.field("START_DATE")
+    END_DATE = _config.field("END_DATE")
+    LEAVE_DATE = _config.field("LEAVE_DATE")
+    LEAVE_DAYS = _config.field("LEAVE_DAYS")
+    LEAVE_REASON = _config.field("LEAVE_REASON")
     
     # === Approval Chain (Names - Visible) ===
-    SALES_DEPT_MANAGER_NAME = "1005573"  # 營業部負責人
-    DIRECT_SUPERVISOR_NAME = "1005574"  # 直屬主管
+    SALES_DEPT_MANAGER_NAME = _config.field("SALES_DEPT_MANAGER_NAME")
+    DIRECT_SUPERVISOR_NAME = _config.field("DIRECT_SUPERVISOR_NAME")
     
     # === Approval Chain (Emails - Hidden, for triggering workflow) ===
-    SALES_DEPT_MANAGER_EMAIL = "1005670"  # 營業部負責人電子郵件信箱
-    DIRECT_SUPERVISOR_EMAIL = "1005671"  # 直屬主管電子郵件信箱
+    SALES_DEPT_MANAGER_EMAIL = _config.field("SALES_DEPT_MANAGER_EMAIL")
+    DIRECT_SUPERVISOR_EMAIL = _config.field("DIRECT_SUPERVISOR_EMAIL")
     
     # === System Fields ===
-    APPROVAL_STATUS = "1005575"  # 審核狀態
-    LEAVE_REQUEST_NO = "1005576"  # 請假單號
-    CREATED_DATE = "1005577"  # 建立日期
+    APPROVAL_STATUS = _config.field("APPROVAL_STATUS")
+    LEAVE_REQUEST_NO = _config.field("LEAVE_REQUEST_NO")
+    CREATED_DATE = _config.field("CREATED_DATE")
 
 
 class RagicLeaveTypeFieldMapping:
     """
     Ragic Field ID mappings for the Leave Type master data form.
     
-    These constants map our model attributes to Ragic field IDs.
-    Used for syncing leave type options from Ragic.
-    
-    Field Reference:
-        The Leave Type form at /HSIBAdmSys/ragicforms39/20007
-        Key Field: 3005180
-        Generated: 2026/01/28
+    Loads field IDs from the centralized ragic_columns.json file.
     """
     
+    _config = get_leave_type_form()
+    
     # === Primary Key ===
-    RAGIC_ID = "3005180"  # Key Field (假別系統編號)
+    RAGIC_ID = _config.field("RAGIC_ID")
     
     # === Leave Type Info ===
-    LEAVE_TYPE_CODE = "3005177"  # 假別編號
-    LEAVE_TYPE_NAME = "3005178"  # 請假類別
-    DEDUCTION_MULTIPLIER = "3005179"  # 扣薪乘數
+    LEAVE_TYPE_CODE = _config.field("LEAVE_TYPE_CODE")
+    LEAVE_TYPE_NAME = _config.field("LEAVE_TYPE_NAME")
+    DEDUCTION_MULTIPLIER = _config.field("DEDUCTION_MULTIPLIER")
 
 
 class RagicAccountFieldMapping:
     """
     Ragic Field ID mappings for the unified Account form.
     
-    These constants map our model attributes to Ragic field IDs.
-    Used for schema validation and data transformation.
-    
-    Field Reference:
-        The Account form at /HSIBAdmSys/ychn-test/11
-        contains all employee/account data in a single table.
+    Loads field IDs from the centralized ragic_columns.json file.
     """
     
+    _config = get_account_form()
+    
     # === Primary Identification ===
-    RAGIC_ID = "1005971"  # 帳號系統編號
-    ACCOUNT_ID = "1005972"  # 帳號
-    ID_CARD_NUMBER = "1005973"  # 身份證字號
-    EMPLOYEE_ID = "1005983"  # 員工編號
+    RAGIC_ID = _config.field("RAGIC_ID")
+    ACCOUNT_ID = _config.field("ACCOUNT_ID")
+    ID_CARD_NUMBER = _config.field("ID_CARD_NUMBER")
+    EMPLOYEE_ID = _config.field("EMPLOYEE_ID")
     
     # === Status & Basic Info ===
-    STATUS = "1005974"  # 狀態 (0:停用, 1:正常)
-    NAME = "1005975"  # 姓名
-    GENDER = "1005976"  # 性別 (男/女/法)
-    BIRTHDAY = "1005985"  # 生日
-    EDUCATION = "1005984"  # 教育程度
+    STATUS = _config.field("STATUS")
+    NAME = _config.field("NAME")
+    GENDER = _config.field("GENDER")
+    BIRTHDAY = _config.field("BIRTHDAY")
+    EDUCATION = _config.field("EDUCATION")
     
     # === Contact Info ===
-    EMAILS = "1005977"  # E-Mail (逗號分隔多值)
-    PHONES = "1005986"  # 電話 (逗號分隔多值)
-    MOBILES = "1005987"  # 手機 (逗號分隔多值)
+    EMAILS = _config.field("EMAILS")
+    PHONES = _config.field("PHONES")
+    MOBILES = _config.field("MOBILES")
     
     # === Organization Info ===
-    ORG_CODE = "1005978"  # 組織代號
-    ORG_NAME = "1006049"  # 組織名稱
-    ORG_PATH = "1006031"  # 組織路徑
-    RANK_CODE = "1005979"  # 職級代號
-    RANK_NAME = "1006050"  # 職級名稱
-    SALES_DEPT = "1006058"  # 營業部
-    SALES_DEPT_MANAGER = "1006059"  # 營業部負責人
+    ORG_CODE = _config.field("ORG_CODE")
+    ORG_NAME = _config.field("ORG_NAME")
+    ORG_PATH = _config.field("ORG_PATH")
+    RANK_CODE = _config.field("RANK_CODE")
+    RANK_NAME = _config.field("RANK_NAME")
+    SALES_DEPT = _config.field("SALES_DEPT")
+    SALES_DEPT_MANAGER = _config.field("SALES_DEPT_MANAGER")
     
     # === Referrer & Mentor ===
-    REFERRER_ID_CARD = "1005980"  # 推介者身份證
-    REFERRER_NAME = "1006042"  # 推介者名稱
-    MENTOR_ID_CARD = "1005981"  # 輔導者身份證
-    MENTOR_NAME = "1006043"  # 輔導者名稱
-    SUCCESSOR_NAME = "1006045"  # 繼承人名稱
-    SUCCESSOR_ID_CARD = "1006046"  # 繼承人身分證
+    REFERRER_ID_CARD = _config.field("REFERRER_ID_CARD")
+    REFERRER_NAME = _config.field("REFERRER_NAME")
+    MENTOR_ID_CARD = _config.field("MENTOR_ID_CARD")
+    MENTOR_NAME = _config.field("MENTOR_NAME")
+    SUCCESSOR_NAME = _config.field("SUCCESSOR_NAME")
+    SUCCESSOR_ID_CARD = _config.field("SUCCESSOR_ID_CARD")
     
     # === Employment Dates ===
-    APPROVAL_DATE = "1006016"  # 核准日期
-    EFFECTIVE_DATE = "1006017"  # 生效日期
-    RESIGNATION_DATE = "1006019"  # 離職日期
-    DEATH_DATE = "1006024"  # 身故日期
-    CREATED_DATE = "1006015"  # 建立日期
+    APPROVAL_DATE = _config.field("APPROVAL_DATE")
+    EFFECTIVE_DATE = _config.field("EFFECTIVE_DATE")
+    RESIGNATION_DATE = _config.field("RESIGNATION_DATE")
+    DEATH_DATE = _config.field("DEATH_DATE")
+    CREATED_DATE = _config.field("CREATED_DATE")
     
     # === Rate & Financial ===
-    ASSESSMENT_RATE = "1005982"  # 考核率
-    COURT_WITHHOLDING_RATE = "1006025"  # 法院強制執行扣押率
-    COURT_MIN_LIVING_EXPENSE = "1006051"  # 法院強制執行最低生活費保障
-    PRIOR_COMMISSION_DEBT = "1006026"  # 前期欠佣
-    PRIOR_DEBT = "1006027"  # 前期欠款
+    ASSESSMENT_RATE = _config.field("ASSESSMENT_RATE")
+    COURT_WITHHOLDING_RATE = _config.field("COURT_WITHHOLDING_RATE")
+    COURT_MIN_LIVING_EXPENSE = _config.field("COURT_MIN_LIVING_EXPENSE")
+    PRIOR_COMMISSION_DEBT = _config.field("PRIOR_COMMISSION_DEBT")
+    PRIOR_DEBT = _config.field("PRIOR_DEBT")
     
     # === Bank Info ===
-    BANK_NAME = "1006010"  # 銀行名稱
-    BANK_BRANCH_CODE = "1006011"  # 銀行分行代碼
-    BANK_ACCOUNT = "1006012"  # 銀行帳號
-    EDI_FORMAT = "1006033"  # EDI格式
+    BANK_NAME = _config.field("BANK_NAME")
+    BANK_BRANCH_CODE = _config.field("BANK_BRANCH_CODE")
+    BANK_ACCOUNT = _config.field("BANK_ACCOUNT")
+    EDI_FORMAT = _config.field("EDI_FORMAT")
     
     # === Address - Household Registration ===
-    HOUSEHOLD_POSTAL_CODE = "1005988"  # 戶籍郵遞區號
-    HOUSEHOLD_CITY = "1005989"  # 戶籍縣市
-    HOUSEHOLD_DISTRICT = "1005990"  # 戶籍鄉鎮市區
-    HOUSEHOLD_ADDRESS = "1005991"  # 戶籍地址
+    HOUSEHOLD_POSTAL_CODE = _config.field("HOUSEHOLD_POSTAL_CODE")
+    HOUSEHOLD_CITY = _config.field("HOUSEHOLD_CITY")
+    HOUSEHOLD_DISTRICT = _config.field("HOUSEHOLD_DISTRICT")
+    HOUSEHOLD_ADDRESS = _config.field("HOUSEHOLD_ADDRESS")
     
     # === Address - Mailing ===
-    MAILING_POSTAL_CODE = "1005992"  # 通訊郵遞區號
-    MAILING_CITY = "1005993"  # 通訊縣市
-    MAILING_DISTRICT = "1005994"  # 通訊鄉鎮市區
-    MAILING_ADDRESS = "1005995"  # 通訊地址
+    MAILING_POSTAL_CODE = _config.field("MAILING_POSTAL_CODE")
+    MAILING_CITY = _config.field("MAILING_CITY")
+    MAILING_DISTRICT = _config.field("MAILING_DISTRICT")
+    MAILING_ADDRESS = _config.field("MAILING_ADDRESS")
     
     # === Emergency Contact ===
-    EMERGENCY_CONTACT = "1005996"  # 緊急聯絡人
-    EMERGENCY_PHONE = "1005997"  # 緊急聯絡電話
+    EMERGENCY_CONTACT = _config.field("EMERGENCY_CONTACT")
+    EMERGENCY_PHONE = _config.field("EMERGENCY_PHONE")
     
     # === Life Insurance License ===
-    LIFE_LICENSE_NUMBER = "1005998"  # 壽險證照號碼
-    LIFE_FIRST_REGISTRATION_DATE = "1006018"  # 壽險初次登錄日期
-    LIFE_REGISTRATION_DATE = "1005999"  # 壽險登錄日期
-    LIFE_EXAM_NUMBER = "1006000"  # 壽險考試號碼
-    LIFE_CANCELLATION_DATE = "1006001"  # 壽險註銷日期
-    LIFE_LICENSE_EXPIRY = "1006028"  # 壽險證照有效期限
+    LIFE_LICENSE_NUMBER = _config.field("LIFE_LICENSE_NUMBER")
+    LIFE_FIRST_REGISTRATION_DATE = _config.field("LIFE_FIRST_REGISTRATION_DATE")
+    LIFE_REGISTRATION_DATE = _config.field("LIFE_REGISTRATION_DATE")
+    LIFE_EXAM_NUMBER = _config.field("LIFE_EXAM_NUMBER")
+    LIFE_CANCELLATION_DATE = _config.field("LIFE_CANCELLATION_DATE")
+    LIFE_LICENSE_EXPIRY = _config.field("LIFE_LICENSE_EXPIRY")
     
     # === Property Insurance License ===
-    PROPERTY_LICENSE_NUMBER = "1006002"  # 產險證照號碼
-    PROPERTY_REGISTRATION_DATE = "1006003"  # 產險登錄日期
-    PROPERTY_EXAM_NUMBER = "1006004"  # 產險考試號碼
-    PROPERTY_CANCELLATION_DATE = "1006005"  # 產險註銷日期
-    PROPERTY_LICENSE_EXPIRY = "1006029"  # 產險證照有效期限
-    PROPERTY_STANDARD_DATE = "1006041"  # 產險標準日
+    PROPERTY_LICENSE_NUMBER = _config.field("PROPERTY_LICENSE_NUMBER")
+    PROPERTY_REGISTRATION_DATE = _config.field("PROPERTY_REGISTRATION_DATE")
+    PROPERTY_EXAM_NUMBER = _config.field("PROPERTY_EXAM_NUMBER")
+    PROPERTY_CANCELLATION_DATE = _config.field("PROPERTY_CANCELLATION_DATE")
+    PROPERTY_LICENSE_EXPIRY = _config.field("PROPERTY_LICENSE_EXPIRY")
+    PROPERTY_STANDARD_DATE = _config.field("PROPERTY_STANDARD_DATE")
     
     # === Accident & Health Insurance License ===
-    AH_LICENSE_NUMBER = "1006021"  # 傷健險證照號碼
-    AH_REGISTRATION_DATE = "1006022"  # 傷健險登錄日期
-    AH_CANCELLATION_DATE = "1006023"  # 傷健險註銷日期
-    AH_LICENSE_EXPIRY = "1006030"  # 傷健險證照有效期限
+    AH_LICENSE_NUMBER = _config.field("AH_LICENSE_NUMBER")
+    AH_REGISTRATION_DATE = _config.field("AH_REGISTRATION_DATE")
+    AH_CANCELLATION_DATE = _config.field("AH_CANCELLATION_DATE")
+    AH_LICENSE_EXPIRY = _config.field("AH_LICENSE_EXPIRY")
     
     # === Investment-linked Insurance ===
-    INVESTMENT_REGISTRATION_DATE = "1006006"  # 投資型登錄日期
-    INVESTMENT_EXAM_NUMBER = "1006007"  # 投資型考試號碼
+    INVESTMENT_REGISTRATION_DATE = _config.field("INVESTMENT_REGISTRATION_DATE")
+    INVESTMENT_EXAM_NUMBER = _config.field("INVESTMENT_EXAM_NUMBER")
     
     # === Foreign Currency Insurance ===
-    FOREIGN_CURRENCY_REGISTRATION_DATE = "1006008"  # 外幣型登錄日期
-    FOREIGN_CURRENCY_EXAM_NUMBER = "1006009"  # 外幣型考試號碼
+    FOREIGN_CURRENCY_REGISTRATION_DATE = _config.field("FOREIGN_CURRENCY_REGISTRATION_DATE")
+    FOREIGN_CURRENCY_EXAM_NUMBER = _config.field("FOREIGN_CURRENCY_EXAM_NUMBER")
     
     # === Qualifications ===
-    FUND_QUALIFICATION_DATE = "1006034"  # 基金資格通報日期
-    TRADITIONAL_ANNUITY_QUALIFICATION = "1006035"  # 傳統年金資格
-    VARIABLE_ANNUITY_QUALIFICATION = "1006036"  # 利率變動型年金資格
-    STRUCTURED_BOND_QUALIFICATION = "1006037"  # 結構債資格
-    MOBILE_INSURANCE_EXAM_DATE = "1006038"  # 行動投保考試合格日期
-    PREFERRED_INSURANCE_EXAM_DATE = "1006039"  # 優體保險考試合格日期
-    APP_ENABLED = "1006040"  # 啟用APP
+    FUND_QUALIFICATION_DATE = _config.field("FUND_QUALIFICATION_DATE")
+    TRADITIONAL_ANNUITY_QUALIFICATION = _config.field("TRADITIONAL_ANNUITY_QUALIFICATION")
+    VARIABLE_ANNUITY_QUALIFICATION = _config.field("VARIABLE_ANNUITY_QUALIFICATION")
+    STRUCTURED_BOND_QUALIFICATION = _config.field("STRUCTURED_BOND_QUALIFICATION")
+    MOBILE_INSURANCE_EXAM_DATE = _config.field("MOBILE_INSURANCE_EXAM_DATE")
+    PREFERRED_INSURANCE_EXAM_DATE = _config.field("PREFERRED_INSURANCE_EXAM_DATE")
+    APP_ENABLED = _config.field("APP_ENABLED")
     
     # === Training Completion Dates ===
-    SENIOR_TRAINING_DATE = "1006054"  # 高齡訓練完成日
-    FOREIGN_CURRENCY_TRAINING_DATE = "1006055"  # 外幣訓練完成日
-    FAIR_TREATMENT_TRAINING_DATE = "1006056"  # 公平待客訓練完成日
-    PROFIT_SHARING_TRAINING_DATE = "1006057"  # 分紅訓練完成日
+    SENIOR_TRAINING_DATE = _config.field("SENIOR_TRAINING_DATE")
+    FOREIGN_CURRENCY_TRAINING_DATE = _config.field("FOREIGN_CURRENCY_TRAINING_DATE")
+    FAIR_TREATMENT_TRAINING_DATE = _config.field("FAIR_TREATMENT_TRAINING_DATE")
+    PROFIT_SHARING_TRAINING_DATE = _config.field("PROFIT_SHARING_TRAINING_DATE")
     
     # === Office Info ===
-    OFFICE = "1006013"  # 事務所
-    OFFICE_TAX_ID = "1006014"  # 事務所統一編號
-    SUBMISSION_UNIT = "1006032"  # 送件單位
+    OFFICE = _config.field("OFFICE")
+    OFFICE_TAX_ID = _config.field("OFFICE_TAX_ID")
+    SUBMISSION_UNIT = _config.field("SUBMISSION_UNIT")
     
     # === Health Insurance Withholding ===
-    NHI_WITHHOLDING_STATUS = "1006047"  # 二代健保代扣狀態
-    NHI_WITHHOLDING_UPDATE_DATE = "1006048"  # 二代健保代扣狀態更新日期
+    NHI_WITHHOLDING_STATUS = _config.field("NHI_WITHHOLDING_STATUS")
+    NHI_WITHHOLDING_UPDATE_DATE = _config.field("NHI_WITHHOLDING_UPDATE_DATE")
     
     # === Miscellaneous ===
-    REMARKS = "1006020"  # 備註
-    NOTES = "1006053"  # 注意事項
-    ACCOUNT_ATTRIBUTES = "1006052"  # 帳號屬性
-    LAST_MODIFIED = "1006044"  # 最後修改
+    REMARKS = _config.field("REMARKS")
+    NOTES = _config.field("NOTES")
+    ACCOUNT_ATTRIBUTES = _config.field("ACCOUNT_ATTRIBUTES")
+    LAST_MODIFIED = _config.field("LAST_MODIFIED")
 
 
 class AdminSettings(BaseSettings):
@@ -224,6 +215,8 @@ class AdminSettings(BaseSettings):
     
     All variables use the ADMIN_ prefix for module isolation.
     Sensitive values use SecretStr for security.
+    
+    Note: Ragic URLs are now loaded from ragic_columns.json (centralized config).
     """
 
     model_config = SettingsConfigDict(
@@ -233,7 +226,7 @@ class AdminSettings(BaseSettings):
         extra="ignore",
     )
 
-    # Ragic API Configuration
+    # Ragic API Configuration (only API key from env, URLs from JSON)
     ragic_api_key: Annotated[
         SecretStr,
         Field(
@@ -241,32 +234,6 @@ class AdminSettings(BaseSettings):
             validation_alias="ADMIN_RAGIC_API_KEY",
         ),
     ]
-
-    ragic_url_account: Annotated[
-        str,
-        Field(
-            description="Full URL for the Ragic Account Form API endpoint",
-            validation_alias="ADMIN_RAGIC_URL_ACCOUNT",
-        ),
-    ]
-
-    ragic_url_leave: Annotated[
-        str,
-        Field(
-            default="",
-            description="Full URL for the Ragic Leave Request Form API endpoint",
-            validation_alias="ADMIN_RAGIC_URL_LEAVE",
-        ),
-    ] = ""
-
-    ragic_url_leave_type: Annotated[
-        str,
-        Field(
-            default="",
-            description="Full URL for the Ragic Leave Type master data API endpoint",
-            validation_alias="ADMIN_RAGIC_URL_LEAVE_TYPE",
-        ),
-    ] = ""
 
     # Sync Configuration
     sync_batch_size: Annotated[
@@ -313,6 +280,22 @@ class AdminSettings(BaseSettings):
             validation_alias="ADMIN_LINE_LIFF_ID_LEAVE",
         ),
     ] = ""
+
+    # === Ragic URLs (loaded from ragic_columns.json) ===
+    @property
+    def ragic_url_account(self) -> str:
+        """Full URL for the Ragic Account Form API endpoint."""
+        return get_account_form().url
+
+    @property
+    def ragic_url_leave(self) -> str:
+        """Full URL for the Ragic Leave Request Form API endpoint."""
+        return get_leave_form().url
+
+    @property
+    def ragic_url_leave_type(self) -> str:
+        """Full URL for the Ragic Leave Type master data API endpoint."""
+        return get_leave_type_form().url
 
 
 @lru_cache

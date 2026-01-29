@@ -22,7 +22,6 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.app_context import ConfigLoader
 from core.database.session import get_standalone_session
 from core.schemas.auth import RagicEmployeeData
 
@@ -34,15 +33,21 @@ logger = logging.getLogger(__name__)
 
 
 class RagicFieldConfig:
-    """Configuration for Ragic field mapping (unified Account table)."""
+    """Configuration for Ragic field mapping (unified Account table).
     
-    def __init__(self, config: dict[str, Any]) -> None:
-        ragic_config = config.get("ragic", {})
+    Now loads field IDs from the centralized ragic_columns.json file.
+    """
+    
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
+        # Import here to avoid circular imports at module load time
+        from core.ragic.columns import get_account_form
         
-        # Field IDs from config (unified Account table /HSIBAdmSys/ychn-test/11)
-        self.email_id = ragic_config.get("field_email", "1005977")  # EMAILS (多值，逗號分隔)
-        self.name_id = ragic_config.get("field_name", "1005975")  # NAME
-        self.door_access_id = ragic_config.get("field_door_access_id", "1005983")  # EMPLOYEE_ID
+        account = get_account_form()
+        
+        # Field IDs from centralized config
+        self.email_id = account.field("EMAILS")
+        self.name_id = account.field("NAME")
+        self.door_access_id = account.field("EMPLOYEE_ID")
         
         # Chinese name mappings for fuzzy matching
         self.email_names = ["E-mail", "電子郵件", "email", "Email", "郵件", "E-Mail"]
@@ -62,14 +67,12 @@ class RagicService(BaseRagicService):
         # Initialize base service
         super().__init__()
         
-        # Load additional config for employee verification
-        self._config_loader = ConfigLoader()
-        self._config_loader.load()
+        # Load config from centralized ragic_columns.json
+        from core.ragic.columns import get_account_form
+        account = get_account_form()
         
-        ragic_config = self._config_loader.get("ragic", {})
-        self._sheet_path = ragic_config.get("employee_sheet_path", "/HSIBAdmSys/ychn-test/11")
-        
-        self._field_config = RagicFieldConfig(self._config_loader._config)
+        self._sheet_path = account.sheet_path
+        self._field_config = RagicFieldConfig()
     
     def _get_field_value(
         self,

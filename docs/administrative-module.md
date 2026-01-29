@@ -29,8 +29,8 @@ modules/administrative/
 │   └── menu.py                     # Flex Message 模板
 ├── models/
 │   ├── __init__.py
-│   ├── employee.py                 # AdministrativeEmployee 模型
-│   └── department.py               # AdministrativeDepartment 模型
+│   ├── account.py                  # AdministrativeAccount 模型 (含部門資訊)
+│   └── leave_type.py               # LeaveType 模型 (假別清單)
 ├── routers/
 │   ├── __init__.py                 # 匯出所有 routers
 │   ├── leave.py                    # 請假 API 端點
@@ -95,55 +95,46 @@ class AdministrativeModule(IAppModule):
 ```python
 # core/config.py
 class AdminSettings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        case_sensitive=False,
-        extra="ignore",
-    )
-
     # Ragic API
     ragic_api_key: SecretStr = Field(validation_alias="ADMIN_RAGIC_API_KEY")
-    ragic_url_employee: str = Field(validation_alias="ADMIN_RAGIC_URL_EMPLOYEE")
-    ragic_url_dept: str = Field(validation_alias="ADMIN_RAGIC_URL_DEPT")
+    ragic_url_account: str = Field(validation_alias="ADMIN_RAGIC_URL_ACCOUNT")
+    ragic_url_leave: str = Field(validation_alias="ADMIN_RAGIC_URL_LEAVE")
+    ragic_url_leave_type: str = Field(validation_alias="ADMIN_RAGIC_URL_LEAVE_TYPE")
     
     # LINE Channel (獨立帳號)
     line_channel_secret: SecretStr = Field(validation_alias="ADMIN_LINE_CHANNEL_SECRET")
     line_channel_access_token: SecretStr = Field(validation_alias="ADMIN_LINE_CHANNEL_ACCESS_TOKEN")
     line_liff_id_leave: str = Field(validation_alias="ADMIN_LINE_LIFF_ID_LEAVE")
-    
-    # 欄位映射 (使用 Ragic Field ID)
-    field_employee_email: str = "1001132"
-    field_employee_name: str = "1001129"
-    field_employee_department: str = "1001194"
-    field_employee_supervisor_email: str = "1001182"
 ```
 
 ---
 
 ## 資料模型
 
-### AdministrativeEmployee (員工快取)
+### AdministrativeAccount (員工與組織快取)
 
 ```python
-class AdministrativeEmployee(Base, TimestampMixin):
-    __tablename__ = "administrative_employee"
+class AdministrativeAccount(Base, TimestampMixin):
+    __tablename__ = "administrative_account"
 
-    email: Mapped[str]              # Primary Key
+    account_id: Mapped[str]         # Primary Identifier
     name: Mapped[str]
-    department_name: Mapped[str | None]
-    supervisor_email: Mapped[str | None]
+    emails: Mapped[str | None]      # Comma separated
+    org_name: Mapped[str | None]    # 部門/組織名稱
+    sales_dept: Mapped[str | None]  # 營業部
+    sales_dept_manager: Mapped[str | None]
     ragic_id: Mapped[int]           # Ragic 內部記錄 ID
 ```
 
-### AdministrativeDepartment (部門快取)
+### LeaveType (假別快取)
 
 ```python
-class AdministrativeDepartment(Base, TimestampMixin):
-    __tablename__ = "administrative_department"
+class LeaveType(Base, TimestampMixin):
+    __tablename__ = "administrative_leave_type"
 
-    name: Mapped[str]               # Primary Key
-    manager_email: Mapped[str | None]
-    ragic_id: Mapped[int]
+    leave_type_code: Mapped[str]
+    leave_type_name: Mapped[str]
+    deduction_multiplier: Mapped[float]
 ```
 
 ---
@@ -177,13 +168,15 @@ from modules.administrative.services import RagicSyncService
 
 sync_service = RagicSyncService()
 result = await sync_service.sync_all_data()
-print(f"Synced {result['employees_synced']} employees")
+print(f"Synced {result['accounts_synced']} accounts")
+print(f"Synced {result['leave_types_synced']} leave types")
 ```
 
 **特性：**
-- 使用 `naming=EID` 參數確保回傳 Field ID 作為 key
-- 批次 upsert 避免 PostgreSQL 參數限制
-- **Email 補救機制**：當 Ragic 缺少 email 時，從 `core.models.User` 表查詢已驗證用戶的 email
+- **Unified Sync**: 同步 `AdministrativeAccount` (帳號/部門) 與 `LeaveType` (假別)。
+- **Batch Processing**: 分批次處理避免資料庫參數限制。
+- **Auto-Schema**: 自動檢查表是否存在並建立。
+- **Direct Link**: 透過 URL 直接指定 Ragic 表單來源。
 
 ### RichMenuService
 

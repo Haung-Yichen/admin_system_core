@@ -51,24 +51,50 @@ Admin System Core 採用 **Modular Monolith (模組化單體)** 架構。
     *   **加密保護**: 關鍵個資 (Email, Line ID, Name) 皆自動加密。
 *   **UsedToken Model**: 追蹤已使用的 Magic Link Token，防止重複使用。
 
-### 5. 核心服務 (Core Services)
+### 5. Ragic 統一整合層 (Unified Ragic Integration)
+
+提供標準化、型別安全的方式與 Ragic 資料庫互動。
+
+*   **路徑**: `core/ragic/`
+*   **Service**: 標準化 HTTP Client，處理重試、錯誤處理。
+*   **Repository Pattern**: 封裝資料存取邏輯，提供高階 CRUD 操作。
+*   **Models**: 定義 Ragic 表單結構，支援欄位映射。
+
+### 6. 基礎設施服務 (Infrastructure)
+*   **LineClient** (`services/line_client.py`): 底層 LINE API 用戶端，負責 HTTP 通訊與簽章驗證。
+
+---
+
+## 核心服務 (Core Services)
 
 框架提供以下可供模組直接調用的服務：
 
-*   **路徑**: `core/services/`
-*   **AuthService**: LINE ID Token (OIDC) 驗證與 Magic Link 帳號綁定。
-    *   `get_auth_service()`: 取得 singleton 實例
-    *   `verify_line_id_token(id_token)`: 驗證 LINE ID Token 並取得 `sub`
-    *   `check_binding_status(id_token, db)`: 檢查帳號綁定狀態
-    *   `get_user_by_line_sub(line_sub, db)`: 以 LINE sub 取得使用者資料
-    *   `initiate_magic_link(email, line_sub)`: 發送驗證信進行綁定
-*   **RagicService**: 員工資料庫查詢。
-    *   `get_ragic_service()`: 取得 singleton 實例
-    *   `verify_email_exists(email)`: 驗證 Email 是否為有效員工
+*   **路徑**: `core/services/` (主要業務服務)
 
-### 6. 核心 API (Core API Endpoints)
+### AuthService (`core/services/auth.py`)
+負責 LINE ID Token 驗證與 Magic Link 帳號綁定。
+*   `get_auth_service()`: 取得 singleton 實例
+*   `verify_line_id_token(id_token)`: 驗證 LINE ID Token
+*   `check_binding_status`: 檢查帳號綁定狀態
+*   `initiate_magic_link`: 發送登入驗證信
+
+### EmailService (`core/services/email.py`)
+統一的郵件發送服務，支援 SMTP 與非同步發送。
+*   `send_email`: 發送 HTML 郵件
+*   `send_verification_email`: 發送標準驗證信模板
+
+### RagicService (Compatibility Layer) (`core/services/ragic.py`)
+舊版服務介面，現已重構為封裝 `core/ragic` 的功能。
+*   **重要變更**: `verify_email_exists` 與員工查詢功能現已改為**查詢本地資料庫快取** (`administrative_accounts` 表)，而非直接呼叫 Ragic API，以提升效能與穩定性。
+
+---
+
+## 核心 API (Core API Endpoints)
 
 框架自動掛載以下端點，模組**不需**自行實作：
+
+### 認證與授權 (Auth)
+Prefix: `/auth`
 
 | 路徑                   | 方法 | 說明                            |
 | ---------------------- | ---- | ------------------------------- |
@@ -78,6 +104,14 @@ Admin System Core 採用 **Modular Monolith (模組化單體)** 架構。
 | `/auth/magic-link`     | POST | 發送驗證信 (JSON API)           |
 | `/auth/api/verify`     | POST | 驗證 Token (JSON API)           |
 | `/auth/stats`          | GET  | 使用者統計                      |
+
+### 系統狀態 (System)
+Prefix: `/api`
+
+| 路徑                   | 方法 | 說明                            |
+| ---------------------- | ---- | ------------------------------- |
+| `/api/status`          | GET  | 系統狀態與已載入模組列表        |
+| `/api/health`          | GET  | 健康檢查用                      |
 
 ---
 

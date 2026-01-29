@@ -87,7 +87,13 @@ class FastAPIServer:
         app.include_router(auth_router, prefix="/api")
 
         @app.get("/")
-        async def root() -> Dict[str, str]:
+        async def root():
+            """Redirect to dashboard login."""
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(url="/static/login.html")
+
+        @app.get("/health")
+        async def health_check() -> Dict[str, str]:
             """Health check endpoint."""
             return {"status": "ok", "service": "Admin System Core"}
 

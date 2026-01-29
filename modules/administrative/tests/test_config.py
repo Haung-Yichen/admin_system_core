@@ -13,6 +13,7 @@ from modules.administrative.core.config import (
     RagicAccountFieldMapping,
     get_admin_settings,
 )
+from core.ragic.columns import get_account_form, get_leave_form, get_leave_type_form
 
 
 class TestRagicAccountFieldMapping:
@@ -66,7 +67,6 @@ class TestAdminSettings:
         """Set up required environment variables."""
         env_vars = {
             "ADMIN_RAGIC_API_KEY": "test_api_key",
-            "ADMIN_RAGIC_URL_ACCOUNT": "https://ragic.example.com/account",
             "ADMIN_LINE_CHANNEL_SECRET": "test_channel_secret",
             "ADMIN_LINE_CHANNEL_ACCESS_TOKEN": "test_access_token",
         }
@@ -81,7 +81,8 @@ class TestAdminSettings:
         settings = AdminSettings()
 
         assert settings.ragic_api_key.get_secret_value() == "test_api_key"
-        assert settings.ragic_url_account == "https://ragic.example.com/account"
+        # URLs now come from ragic_columns.json (property)
+        assert settings.ragic_url_account == get_account_form().url
 
     def test_secret_values(self, mock_env_vars):
         """Test that secret values are properly protected."""
@@ -110,7 +111,6 @@ class TestAdminSettings:
         get_admin_settings.cache_clear()
 
         monkeypatch.setenv("ADMIN_RAGIC_API_KEY", "test_key")
-        monkeypatch.setenv("ADMIN_RAGIC_URL_ACCOUNT", "https://test.com/account")
         monkeypatch.setenv("ADMIN_LINE_CHANNEL_SECRET", "secret")
         monkeypatch.setenv("ADMIN_LINE_CHANNEL_ACCESS_TOKEN", "token")
         monkeypatch.setenv("ADMIN_SYNC_BATCH_SIZE", "200")
@@ -121,6 +121,17 @@ class TestAdminSettings:
         assert settings.sync_batch_size == 200
         assert settings.sync_timeout_seconds == 120
 
+    def test_url_properties_from_json(self, mock_env_vars):
+        """Test that URL properties load from ragic_columns.json."""
+        get_admin_settings.cache_clear()
+
+        settings = AdminSettings()
+
+        # These are now properties that load from centralized config
+        assert settings.ragic_url_account == get_account_form().url
+        assert settings.ragic_url_leave == get_leave_form().url
+        assert settings.ragic_url_leave_type == get_leave_type_form().url
+
 
 class TestGetAdminSettings:
     """Tests for get_admin_settings cached function."""
@@ -130,7 +141,6 @@ class TestGetAdminSettings:
         get_admin_settings.cache_clear()
 
         monkeypatch.setenv("ADMIN_RAGIC_API_KEY", "test_key")
-        monkeypatch.setenv("ADMIN_RAGIC_URL_ACCOUNT", "https://test.com/account")
         monkeypatch.setenv("ADMIN_LINE_CHANNEL_SECRET", "secret")
         monkeypatch.setenv("ADMIN_LINE_CHANNEL_ACCESS_TOKEN", "token")
 
@@ -143,7 +153,6 @@ class TestGetAdminSettings:
         get_admin_settings.cache_clear()
 
         monkeypatch.setenv("ADMIN_RAGIC_API_KEY", "test_key")
-        monkeypatch.setenv("ADMIN_RAGIC_URL_ACCOUNT", "https://test.com/account")
         monkeypatch.setenv("ADMIN_LINE_CHANNEL_SECRET", "secret")
         monkeypatch.setenv("ADMIN_LINE_CHANNEL_ACCESS_TOKEN", "token")
 
@@ -161,13 +170,13 @@ class TestSettingsValidation:
         get_admin_settings.cache_clear()
 
         monkeypatch.setenv("ADMIN_RAGIC_API_KEY", "test_key")
-        monkeypatch.setenv("ADMIN_RAGIC_URL_ACCOUNT", "https://test.com/account")
         monkeypatch.setenv("ADMIN_LINE_CHANNEL_SECRET", "secret")
         monkeypatch.setenv("ADMIN_LINE_CHANNEL_ACCESS_TOKEN", "token")
 
         settings = AdminSettings()
 
         assert settings.ragic_api_key.get_secret_value() == "test_key"
-        assert settings.ragic_url_account == "https://test.com/account"
+        # URLs now come from JSON
+        assert settings.ragic_url_account == get_account_form().url
         assert settings.line_channel_secret.get_secret_value() == "secret"
         assert settings.line_channel_access_token.get_secret_value() == "token"
