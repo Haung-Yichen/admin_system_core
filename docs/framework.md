@@ -98,4 +98,44 @@ Admin System Core 採用 **Modular Monolith (模組化單體)** 架構。
 *   **獨立模型**: 模組應自行定義 SQLAlchemy Models (`models/` 目錄)。
 *   **使用框架服務**: 模組不應自行建立 DB Engine 或 Redis Client，必須請求核心提供。
 
+### 外部資料快取規範 (External Data Caching)
+
+當模組需要從外部資料來源 (如 Ragic) 快取資料時，**必須**遵循以下模式：
+
+#### 啟動時自動同步 (Auto-Sync on Startup)
+
+```
+系統啟動
+  ↓
+Module.on_entry()
+  ↓
+背景執行緒啟動 sync_all_data()
+  ↓
+├─ _ensure_tables_exist()   ← 檢查表是否存在，不存在則自動建立
+├─ sync_<data_type_1>()     ← 同步資料類型 1
+├─ sync_<data_type_2>()     ← 同步資料類型 2
+└─ ...
+```
+
+#### 實作要點
+
+1.  **表自動建立**: 使用 `_ensure_tables_exist()` 方法，維護一個 `required_tables` 字典，包含所有需要的資料表。
+    ```python
+    required_tables = {
+        Model1.__tablename__: Model1.__table__,
+        Model2.__tablename__: Model2.__table__,
+    }
+    ```
+
+2.  **Upsert 策略**: 使用 PostgreSQL `ON CONFLICT DO UPDATE` 確保資料可重複同步而不會產生重複。
+
+3.  **新增資料表流程**:
+    1. 建立 Model (`models/<new_form>.py`)
+    2. 在 `models/__init__.py` 中匯出
+    3. 在 `_ensure_tables_exist()` 的 `required_tables` 中加入
+    4. 實作 `sync_<new_form>()` 方法
+    5. 在 `sync_all_data()` 中呼叫
+
+4.  **背景執行緒**: 資料同步應在背景執行緒執行，使用獨立的 Event Loop，避免阻塞主應用程式啟動。
+
 ---

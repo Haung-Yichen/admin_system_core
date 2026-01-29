@@ -209,7 +209,7 @@ class TestLeaveSubmitEndpoint:
             json={
                 "leave_date": "2024-03-15",
                 "reason": "Personal matters",
-                "leave_type": "personal",
+                "leave_type": "事假",
             }
         )
 
@@ -355,13 +355,13 @@ class TestRequestSchemas:
         request = LeaveSubmitRequest(
             leave_date="2024-03-15",
             reason="Personal matters",
-            leave_type="personal",
+            leave_type="事假",
             start_time="09:00",
             end_time="18:00",
         )
         assert request.leave_date == "2024-03-15"
         assert request.reason == "Personal matters"
-        assert request.leave_type == "personal"
+        assert request.leave_type == "事假"
 
     def test_leave_submit_request_defaults(self):
         """Test LeaveSubmitRequest default values."""
@@ -369,7 +369,7 @@ class TestRequestSchemas:
             leave_date="2024-03-15",
             reason="Test",
         )
-        assert request.leave_type == "annual"  # default
+        assert request.leave_type == "特休"  # default
         assert request.start_time is None
         assert request.end_time is None
 

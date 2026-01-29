@@ -8,28 +8,455 @@ Features:
     - Schema introspection to validate field mappings
     - Dynamic table creation if not exists
     - Full upsert sync (insert new, update existing)
-    - Email fallback from core User table for records missing email in Ragic
+    - Pydantic validation before database insertion
 """
 
 import logging
-from typing import Any
+from datetime import date, datetime
+from typing import Any, Optional
 
 import httpx
-from sqlalchemy import inspect, select, text
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from sqlalchemy import inspect, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import Base, get_thread_local_engine, get_thread_local_session
-from core.models import User
-from modules.administrative.core.config import AdminSettings, get_admin_settings
-from modules.administrative.models import AdministrativeDepartment, AdministrativeEmployee
+from modules.administrative.core.config import (
+    AdminSettings,
+    RagicAccountFieldMapping as Fields,
+    RagicLeaveTypeFieldMapping as LeaveTypeFields,
+    get_admin_settings,
+)
+from modules.administrative.models import AdministrativeAccount, LeaveType
 
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# Pydantic Schemas for Data Validation
+# =============================================================================
+
+
+class AccountRecordSchema(BaseModel):
+    """
+    Pydantic schema for validating Ragic Account records before DB insertion.
+    
+    Handles:
+        - Type coercion (string to date, int, float, bool)
+        - Empty string to None conversion
+        - Date parsing (YYYY-MM-DD format)
+        - Boolean conversion (0/1 to False/True)
+    """
+    
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        coerce_numbers_to_str=False,
+    )
+    
+    # === Primary Identification ===
+    ragic_id: int
+    account_id: str
+    id_card_number: Optional[str] = None
+    employee_id: Optional[str] = None
+    
+    # === Status & Basic Info ===
+    status: bool = True
+    name: str
+    gender: Optional[str] = None
+    birthday: Optional[date] = None
+    education: Optional[str] = None
+    
+    # === Contact Info ===
+    emails: Optional[str] = None
+    phones: Optional[str] = None
+    mobiles: Optional[str] = None
+    
+    # === Organization Info ===
+    org_code: Optional[str] = None
+    org_name: Optional[str] = None
+    org_path: Optional[str] = None
+    rank_code: Optional[str] = None
+    rank_name: Optional[str] = None
+    sales_dept: Optional[str] = None
+    sales_dept_manager: Optional[str] = None
+    
+    # === Referrer & Mentor ===
+    referrer_id_card: Optional[str] = None
+    referrer_name: Optional[str] = None
+    mentor_id_card: Optional[str] = None
+    mentor_name: Optional[str] = None
+    successor_name: Optional[str] = None
+    successor_id_card: Optional[str] = None
+    
+    # === Employment Dates ===
+    approval_date: Optional[date] = None
+    effective_date: Optional[date] = None
+    resignation_date: Optional[date] = None
+    death_date: Optional[date] = None
+    created_date: Optional[date] = None
+    
+    # === Rate & Financial ===
+    assessment_rate: Optional[float] = None
+    court_withholding_rate: Optional[float] = None
+    court_min_living_expense: Optional[float] = None
+    prior_commission_debt: Optional[float] = None
+    prior_debt: Optional[float] = None
+    
+    # === Bank Info ===
+    bank_name: Optional[str] = None
+    bank_branch_code: Optional[str] = None
+    bank_account: Optional[str] = None
+    edi_format: Optional[int] = None
+    
+    # === Address - Household Registration ===
+    household_postal_code: Optional[str] = None
+    household_city: Optional[str] = None
+    household_district: Optional[str] = None
+    household_address: Optional[str] = None
+    
+    # === Address - Mailing ===
+    mailing_postal_code: Optional[str] = None
+    mailing_city: Optional[str] = None
+    mailing_district: Optional[str] = None
+    mailing_address: Optional[str] = None
+    
+    # === Emergency Contact ===
+    emergency_contact: Optional[str] = None
+    emergency_phone: Optional[str] = None
+    
+    # === Life Insurance License ===
+    life_license_number: Optional[str] = None
+    life_first_registration_date: Optional[date] = None
+    life_registration_date: Optional[date] = None
+    life_exam_number: Optional[str] = None
+    life_cancellation_date: Optional[date] = None
+    life_license_expiry: Optional[str] = None
+    
+    # === Property Insurance License ===
+    property_license_number: Optional[str] = None
+    property_registration_date: Optional[date] = None
+    property_exam_number: Optional[str] = None
+    property_cancellation_date: Optional[date] = None
+    property_license_expiry: Optional[str] = None
+    property_standard_date: Optional[date] = None
+    
+    # === Accident & Health Insurance License ===
+    ah_license_number: Optional[str] = None
+    ah_registration_date: Optional[date] = None
+    ah_cancellation_date: Optional[date] = None
+    ah_license_expiry: Optional[str] = None
+    
+    # === Investment-linked Insurance ===
+    investment_registration_date: Optional[date] = None
+    investment_exam_number: Optional[str] = None
+    
+    # === Foreign Currency Insurance ===
+    foreign_currency_registration_date: Optional[date] = None
+    foreign_currency_exam_number: Optional[str] = None
+    
+    # === Qualifications ===
+    fund_qualification_date: Optional[date] = None
+    traditional_annuity_qualification: Optional[bool] = None
+    variable_annuity_qualification: Optional[bool] = None
+    structured_bond_qualification: Optional[bool] = None
+    mobile_insurance_exam_date: Optional[date] = None
+    preferred_insurance_exam_date: Optional[date] = None
+    app_enabled: Optional[bool] = None
+    
+    # === Training Completion Dates ===
+    senior_training_date: Optional[date] = None
+    foreign_currency_training_date: Optional[date] = None
+    fair_treatment_training_date: Optional[date] = None
+    profit_sharing_training_date: Optional[date] = None
+    
+    # === Office Info ===
+    office: Optional[str] = None
+    office_tax_id: Optional[str] = None
+    submission_unit: Optional[str] = None
+    
+    # === Health Insurance Withholding ===
+    nhi_withholding_status: Optional[int] = None
+    nhi_withholding_update_date: Optional[date] = None
+    
+    # === Miscellaneous ===
+    remarks: Optional[str] = None
+    notes: Optional[str] = None
+    account_attributes: Optional[str] = None
+    last_modified: Optional[datetime] = None
+
+
+# =============================================================================
+# Data Transformation Helpers
+# =============================================================================
+
+
+def parse_date(value: Any) -> Optional[date]:
+    """Parse a date value from Ragic (YYYY/MM/DD or YYYY-MM-DD format)."""
+    if not value or value == "":
+        return None
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+        # Handle multi-value dates (e.g., "2025-02-12, 2025-12-01") - take first
+        if ", " in value:
+            value = value.split(", ")[0].strip()
+        # Try different date formats
+        for fmt in ["%Y-%m-%d", "%Y/%m/%d"]:
+            try:
+                return datetime.strptime(value, fmt).date()
+            except ValueError:
+                continue
+        logger.debug(f"Could not parse date: {value}")
+        return None
+    return None
+
+
+def parse_datetime(value: Any) -> Optional[datetime]:
+    """Parse a datetime value from Ragic (YYYY/MM/DD HH:ii:ss or YYYY-MM-DD HH:ii:ss format)."""
+    if not value or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+        # Try different datetime formats
+        for fmt in [
+            "%Y-%m-%d %H:%M:%S",
+            "%Y/%m/%d %H:%M:%S",
+            "%Y-%m-%d",
+            "%Y/%m/%d",
+        ]:
+            try:
+                return datetime.strptime(value, fmt)
+            except ValueError:
+                continue
+        logger.debug(f"Could not parse datetime: {value}")
+        return None
+    return None
+
+
+def parse_bool(value: Any) -> Optional[bool]:
+    """Parse a boolean value from Ragic (0/1 format)."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+        return value in ("1", "true", "True", "TRUE", "是")
+    return None
+
+
+def parse_float(value: Any) -> Optional[float]:
+    """Parse a float value from Ragic."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        value = value.strip().replace(",", "")
+        if not value:
+            return None
+        try:
+            return float(value)
+        except ValueError:
+            logger.warning(f"Failed to parse float: {value}")
+            return None
+    return None
+
+
+def parse_int(value: Any) -> Optional[int]:
+    """Parse an integer value from Ragic."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        value = value.strip().replace(",", "")
+        if not value:
+            return None
+        try:
+            return int(float(value))
+        except ValueError:
+            logger.warning(f"Failed to parse int: {value}")
+            return None
+    return None
+
+
+def parse_string(value: Any) -> Optional[str]:
+    """Parse a string value, converting empty to None."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        return value if value else None
+    return str(value).strip() or None
+
+
+def transform_ragic_record(record: dict[str, Any]) -> dict[str, Any]:
+    """
+    Transform a raw Ragic record into a format suitable for Pydantic validation.
+    
+    Args:
+        record: Raw record from Ragic API with field ID keys.
+        
+    Returns:
+        dict with model field names as keys and properly typed values.
+    """
+    return {
+        # === Primary Identification ===
+        "ragic_id": parse_int(record.get(Fields.RAGIC_ID)) or record.get("_ragicId"),
+        "account_id": parse_string(record.get(Fields.ACCOUNT_ID)) or "",
+        "id_card_number": parse_string(record.get(Fields.ID_CARD_NUMBER)),
+        "employee_id": parse_string(record.get(Fields.EMPLOYEE_ID)),
+        
+        # === Status & Basic Info ===
+        "status": parse_bool(record.get(Fields.STATUS)) if record.get(Fields.STATUS) != "" else True,
+        "name": parse_string(record.get(Fields.NAME)) or "Unknown",
+        "gender": parse_string(record.get(Fields.GENDER)),
+        "birthday": parse_date(record.get(Fields.BIRTHDAY)),
+        "education": parse_string(record.get(Fields.EDUCATION)),
+        
+        # === Contact Info ===
+        "emails": parse_string(record.get(Fields.EMAILS)),
+        "phones": parse_string(record.get(Fields.PHONES)),
+        "mobiles": parse_string(record.get(Fields.MOBILES)),
+        
+        # === Organization Info ===
+        "org_code": parse_string(record.get(Fields.ORG_CODE)),
+        "org_name": parse_string(record.get(Fields.ORG_NAME)),
+        "org_path": parse_string(record.get(Fields.ORG_PATH)),
+        "rank_code": parse_string(record.get(Fields.RANK_CODE)),
+        "rank_name": parse_string(record.get(Fields.RANK_NAME)),
+        "sales_dept": parse_string(record.get(Fields.SALES_DEPT)),
+        "sales_dept_manager": parse_string(record.get(Fields.SALES_DEPT_MANAGER)),
+        
+        # === Referrer & Mentor ===
+        "referrer_id_card": parse_string(record.get(Fields.REFERRER_ID_CARD)),
+        "referrer_name": parse_string(record.get(Fields.REFERRER_NAME)),
+        "mentor_id_card": parse_string(record.get(Fields.MENTOR_ID_CARD)),
+        "mentor_name": parse_string(record.get(Fields.MENTOR_NAME)),
+        "successor_name": parse_string(record.get(Fields.SUCCESSOR_NAME)),
+        "successor_id_card": parse_string(record.get(Fields.SUCCESSOR_ID_CARD)),
+        
+        # === Employment Dates ===
+        "approval_date": parse_date(record.get(Fields.APPROVAL_DATE)),
+        "effective_date": parse_date(record.get(Fields.EFFECTIVE_DATE)),
+        "resignation_date": parse_date(record.get(Fields.RESIGNATION_DATE)),
+        "death_date": parse_date(record.get(Fields.DEATH_DATE)),
+        "created_date": parse_date(record.get(Fields.CREATED_DATE)),
+        
+        # === Rate & Financial ===
+        "assessment_rate": parse_float(record.get(Fields.ASSESSMENT_RATE)),
+        "court_withholding_rate": parse_float(record.get(Fields.COURT_WITHHOLDING_RATE)),
+        "court_min_living_expense": parse_float(record.get(Fields.COURT_MIN_LIVING_EXPENSE)),
+        "prior_commission_debt": parse_float(record.get(Fields.PRIOR_COMMISSION_DEBT)),
+        "prior_debt": parse_float(record.get(Fields.PRIOR_DEBT)),
+        
+        # === Bank Info ===
+        "bank_name": parse_string(record.get(Fields.BANK_NAME)),
+        "bank_branch_code": parse_string(record.get(Fields.BANK_BRANCH_CODE)),
+        "bank_account": parse_string(record.get(Fields.BANK_ACCOUNT)),
+        "edi_format": parse_int(record.get(Fields.EDI_FORMAT)),
+        
+        # === Address - Household Registration ===
+        "household_postal_code": parse_string(record.get(Fields.HOUSEHOLD_POSTAL_CODE)),
+        "household_city": parse_string(record.get(Fields.HOUSEHOLD_CITY)),
+        "household_district": parse_string(record.get(Fields.HOUSEHOLD_DISTRICT)),
+        "household_address": parse_string(record.get(Fields.HOUSEHOLD_ADDRESS)),
+        
+        # === Address - Mailing ===
+        "mailing_postal_code": parse_string(record.get(Fields.MAILING_POSTAL_CODE)),
+        "mailing_city": parse_string(record.get(Fields.MAILING_CITY)),
+        "mailing_district": parse_string(record.get(Fields.MAILING_DISTRICT)),
+        "mailing_address": parse_string(record.get(Fields.MAILING_ADDRESS)),
+        
+        # === Emergency Contact ===
+        "emergency_contact": parse_string(record.get(Fields.EMERGENCY_CONTACT)),
+        "emergency_phone": parse_string(record.get(Fields.EMERGENCY_PHONE)),
+        
+        # === Life Insurance License ===
+        "life_license_number": parse_string(record.get(Fields.LIFE_LICENSE_NUMBER)),
+        "life_first_registration_date": parse_date(record.get(Fields.LIFE_FIRST_REGISTRATION_DATE)),
+        "life_registration_date": parse_date(record.get(Fields.LIFE_REGISTRATION_DATE)),
+        "life_exam_number": parse_string(record.get(Fields.LIFE_EXAM_NUMBER)),
+        "life_cancellation_date": parse_date(record.get(Fields.LIFE_CANCELLATION_DATE)),
+        "life_license_expiry": parse_string(record.get(Fields.LIFE_LICENSE_EXPIRY)),
+        
+        # === Property Insurance License ===
+        "property_license_number": parse_string(record.get(Fields.PROPERTY_LICENSE_NUMBER)),
+        "property_registration_date": parse_date(record.get(Fields.PROPERTY_REGISTRATION_DATE)),
+        "property_exam_number": parse_string(record.get(Fields.PROPERTY_EXAM_NUMBER)),
+        "property_cancellation_date": parse_date(record.get(Fields.PROPERTY_CANCELLATION_DATE)),
+        "property_license_expiry": parse_string(record.get(Fields.PROPERTY_LICENSE_EXPIRY)),
+        "property_standard_date": parse_date(record.get(Fields.PROPERTY_STANDARD_DATE)),
+        
+        # === Accident & Health Insurance License ===
+        "ah_license_number": parse_string(record.get(Fields.AH_LICENSE_NUMBER)),
+        "ah_registration_date": parse_date(record.get(Fields.AH_REGISTRATION_DATE)),
+        "ah_cancellation_date": parse_date(record.get(Fields.AH_CANCELLATION_DATE)),
+        "ah_license_expiry": parse_string(record.get(Fields.AH_LICENSE_EXPIRY)),
+        
+        # === Investment-linked Insurance ===
+        "investment_registration_date": parse_date(record.get(Fields.INVESTMENT_REGISTRATION_DATE)),
+        "investment_exam_number": parse_string(record.get(Fields.INVESTMENT_EXAM_NUMBER)),
+        
+        # === Foreign Currency Insurance ===
+        "foreign_currency_registration_date": parse_date(record.get(Fields.FOREIGN_CURRENCY_REGISTRATION_DATE)),
+        "foreign_currency_exam_number": parse_string(record.get(Fields.FOREIGN_CURRENCY_EXAM_NUMBER)),
+        
+        # === Qualifications ===
+        "fund_qualification_date": parse_date(record.get(Fields.FUND_QUALIFICATION_DATE)),
+        "traditional_annuity_qualification": parse_bool(record.get(Fields.TRADITIONAL_ANNUITY_QUALIFICATION)),
+        "variable_annuity_qualification": parse_bool(record.get(Fields.VARIABLE_ANNUITY_QUALIFICATION)),
+        "structured_bond_qualification": parse_bool(record.get(Fields.STRUCTURED_BOND_QUALIFICATION)),
+        "mobile_insurance_exam_date": parse_date(record.get(Fields.MOBILE_INSURANCE_EXAM_DATE)),
+        "preferred_insurance_exam_date": parse_date(record.get(Fields.PREFERRED_INSURANCE_EXAM_DATE)),
+        "app_enabled": parse_bool(record.get(Fields.APP_ENABLED)),
+        
+        # === Training Completion Dates ===
+        "senior_training_date": parse_date(record.get(Fields.SENIOR_TRAINING_DATE)),
+        "foreign_currency_training_date": parse_date(record.get(Fields.FOREIGN_CURRENCY_TRAINING_DATE)),
+        "fair_treatment_training_date": parse_date(record.get(Fields.FAIR_TREATMENT_TRAINING_DATE)),
+        "profit_sharing_training_date": parse_date(record.get(Fields.PROFIT_SHARING_TRAINING_DATE)),
+        
+        # === Office Info ===
+        "office": parse_string(record.get(Fields.OFFICE)),
+        "office_tax_id": parse_string(record.get(Fields.OFFICE_TAX_ID)),
+        "submission_unit": parse_string(record.get(Fields.SUBMISSION_UNIT)),
+        
+        # === Health Insurance Withholding ===
+        "nhi_withholding_status": parse_int(record.get(Fields.NHI_WITHHOLDING_STATUS)),
+        "nhi_withholding_update_date": parse_date(record.get(Fields.NHI_WITHHOLDING_UPDATE_DATE)),
+        
+        # === Miscellaneous ===
+        "remarks": parse_string(record.get(Fields.REMARKS)),
+        "notes": parse_string(record.get(Fields.NOTES)),
+        "account_attributes": parse_string(record.get(Fields.ACCOUNT_ATTRIBUTES)),
+        "last_modified": parse_datetime(record.get(Fields.LAST_MODIFIED)),
+    }
+
+
+# =============================================================================
+# Sync Service
+# =============================================================================
+
+
 class RagicSyncService:
     """
-    Service for synchronizing Ragic data to local PostgreSQL cache.
+    Service for synchronizing Ragic Account data to local PostgreSQL cache.
     
     This service is responsible for:
         1. Validating Ragic form schema matches our field mappings
@@ -102,59 +529,37 @@ class RagicSyncService:
             logger.error(f"Failed to fetch Ragic form schema from {schema_url}: {e}")
             raise
 
-    async def _validate_field_mappings(self) -> dict[str, list[str]]:
+    async def _validate_field_mappings(self) -> list[str]:
         """
-        Validate that our configured field IDs exist in Ragic forms.
+        Validate that critical field IDs exist in Ragic form.
         
         Returns:
-            dict with 'employee' and 'department' keys, each containing
-            a list of missing field IDs (empty if all valid).
+            list of missing field IDs (empty if all valid).
         """
-        issues: dict[str, list[str]] = {"employee": [], "department": []}
+        issues: list[str] = []
         
-        # Validate Employee Form
         try:
-            emp_schema = await self._fetch_form_schema(self._settings.ragic_url_employee)
-            fields = emp_schema.get("fields", {})
+            schema = await self._fetch_form_schema(self._settings.ragic_url_account)
+            fields = schema.get("fields", {})
             
-            required_fields = [
-                self._settings.field_employee_email,
-                self._settings.field_employee_name,
-                self._settings.field_employee_department,
-                self._settings.field_employee_supervisor_email,
+            # Only validate critical fields
+            critical_fields = [
+                Fields.RAGIC_ID,
+                Fields.ACCOUNT_ID,
+                Fields.NAME,
+                Fields.STATUS,
             ]
             
-            for field_id in required_fields:
+            for field_id in critical_fields:
                 if field_id not in fields:
-                    issues["employee"].append(field_id)
+                    issues.append(field_id)
                     logger.warning(
-                        f"Employee field {field_id} not found in Ragic form schema. "
+                        f"Account field {field_id} not found in Ragic form schema. "
                         f"Available fields: {list(fields.keys())[:10]}..."
                     )
         except Exception as e:
-            logger.error(f"Could not validate Employee form schema: {e}")
-            issues["employee"].append("SCHEMA_FETCH_FAILED")
-
-        # Validate Department Form
-        try:
-            dept_schema = await self._fetch_form_schema(self._settings.ragic_url_dept)
-            fields = dept_schema.get("fields", {})
-            
-            required_fields = [
-                self._settings.field_department_name,
-                self._settings.field_department_manager_email,
-            ]
-            
-            for field_id in required_fields:
-                if field_id not in fields:
-                    issues["department"].append(field_id)
-                    logger.warning(
-                        f"Department field {field_id} not found in Ragic form schema. "
-                        f"Available fields: {list(fields.keys())[:10]}..."
-                    )
-        except Exception as e:
-            logger.error(f"Could not validate Department form schema: {e}")
-            issues["department"].append("SCHEMA_FETCH_FAILED")
+            logger.error(f"Could not validate Account form schema: {e}")
+            issues.append("SCHEMA_FETCH_FAILED")
 
         return issues
 
@@ -168,40 +573,48 @@ class RagicSyncService:
         
         Uses SQLAlchemy metadata.create_all to create missing tables.
         This is safe to call even if tables already exist.
+        
+        Checks for:
+            - AdministrativeAccount table (accounts cache)
+            - LeaveType table (leave types cache)
         """
         engine = get_thread_local_engine()
         
+        # Define all tables that need to exist
+        required_tables = {
+            AdministrativeAccount.__tablename__: AdministrativeAccount.__table__,
+            LeaveType.__tablename__: LeaveType.__table__,
+        }
+        
         async with engine.begin() as conn:
-            # Check if tables exist using inspector
+            # Check which tables exist
             def check_tables(sync_conn):
                 inspector = inspect(sync_conn)
-                existing_tables = inspector.get_table_names()
-                return (
-                    AdministrativeEmployee.__tablename__ in existing_tables,
-                    AdministrativeDepartment.__tablename__ in existing_tables,
-                )
+                existing_tables = set(inspector.get_table_names())
+                return existing_tables
             
-            emp_exists, dept_exists = await conn.run_sync(check_tables)
+            existing_tables = await conn.run_sync(check_tables)
             
-            if not emp_exists or not dept_exists:
-                logger.info(
-                    f"Creating missing tables: "
-                    f"employee={not emp_exists}, department={not dept_exists}"
-                )
+            # Find missing tables
+            missing_tables = []
+            for table_name, table_obj in required_tables.items():
+                if table_name not in existing_tables:
+                    missing_tables.append(table_obj)
+                    logger.info(f"Table '{table_name}' not found, will create.")
+            
+            if missing_tables:
+                logger.info(f"Creating {len(missing_tables)} missing table(s)...")
                 
-                # Create only the tables we need
+                # Create only the missing tables
                 await conn.run_sync(
                     lambda sync_conn: Base.metadata.create_all(
                         sync_conn,
-                        tables=[
-                            AdministrativeEmployee.__table__,
-                            AdministrativeDepartment.__table__,
-                        ],
+                        tables=missing_tables,
                     )
                 )
                 logger.info("Cache tables created successfully.")
             else:
-                logger.debug("Cache tables already exist.")
+                logger.debug("All cache tables already exist.")
 
     # =========================================================================
     # Step 3: Data Sync (Upsert)
@@ -242,104 +655,55 @@ class RagicSyncService:
             logger.error(f"Failed to fetch Ragic data from {form_url}: {e}")
             raise
 
-    async def _build_name_to_email_map(
-        self, session: AsyncSession
-    ) -> dict[str, str]:
-        """
-        Build a name-to-email mapping from the core User table.
-        
-        This is used as a fallback when Ragic records are missing email.
-        Since users authenticate through the framework (LINE + Magic Link),
-        we have their verified email in the User table.
-        
-        Returns:
-            dict: Mapping of display_name -> email for verified users.
-        """
-        try:
-            result = await session.execute(
-                select(User.display_name, User.email).where(User.is_active == True)
-            )
-            name_to_email = {}
-            for row in result.all():
-                display_name, email = row
-                if display_name and email:
-                    # Use decoded values (they are encrypted in DB)
-                    name_to_email[display_name.strip()] = email.strip()
-            
-            logger.debug(f"Built name-to-email map with {len(name_to_email)} entries")
-            return name_to_email
-        except Exception as e:
-            logger.warning(f"Failed to build name-to-email map: {e}")
-            return {}
-
-    async def _upsert_employees(
+    async def _upsert_accounts(
         self, records: list[dict[str, Any]], session: AsyncSession
-    ) -> int:
+    ) -> tuple[int, int]:
         """
-        Upsert employee records into the cache table.
+        Upsert account records into the cache table using Pydantic validation.
         
         Uses PostgreSQL INSERT ... ON CONFLICT DO UPDATE.
         Processes in batches to avoid hitting PostgreSQL limits.
-        
-        When Ragic records are missing email, attempts to find the email
-        from the core User table using the employee's name as a lookup key.
         
         Args:
             records: List of Ragic records.
             session: Database session.
             
         Returns:
-            Number of records processed.
+            Tuple of (records_processed, records_skipped).
         """
         if not records:
-            return 0
+            return 0, 0
 
-        # Build fallback name-to-email map from verified users
-        name_to_email = await self._build_name_to_email_map(session)
-        
         values = []
-        missing_email_count = 0
-        recovered_email_count = 0
+        skipped = 0
         
         for record in records:
-            email = record.get(self._settings.field_employee_email, "").strip()
-            name = record.get(self._settings.field_employee_name, "").strip() or "Unknown"
-            
-            # If email is missing, try to recover from User table
-            if not email:
-                missing_email_count += 1
-                # Try to find email by name from verified users
-                if name in name_to_email:
-                    email = name_to_email[name]
-                    recovered_email_count += 1
-                    logger.info(f"Recovered email for '{name}' from User table")
-                else:
+            try:
+                # Transform and validate using Pydantic
+                transformed = transform_ragic_record(record)
+                
+                # Skip records without required fields
+                if not transformed.get("account_id"):
                     logger.warning(
-                        f"Skipping employee without email and no fallback found: "
-                        f"ragic_id={record.get('_ragicId')}, name={name}"
+                        f"Skipping record without account_id: "
+                        f"ragic_id={record.get('_ragicId')}, name={transformed.get('name')}"
                     )
+                    skipped += 1
                     continue
-            
-            values.append({
-                "email": email,
-                "name": name,
-                "department_name": record.get(
-                    self._settings.field_employee_department, ""
-                ).strip() or None,
-                "supervisor_email": record.get(
-                    self._settings.field_employee_supervisor_email, ""
-                ).strip() or None,
-                "ragic_id": record.get("_ragicId"),
-            })
-
-        if missing_email_count > 0:
-            logger.info(
-                f"Email recovery: {recovered_email_count}/{missing_email_count} "
-                f"records recovered from User table"
-            )
+                
+                # Validate through Pydantic schema
+                validated = AccountRecordSchema(**transformed)
+                values.append(validated.model_dump())
+                
+            except Exception as e:
+                logger.warning(
+                    f"Validation failed for record ragic_id={record.get('_ragicId')}: {e}"
+                )
+                skipped += 1
+                continue
 
         if not values:
-            return 0
+            return 0, skipped
 
         # Process in batches to avoid PostgreSQL parameter limits
         batch_size = self._settings.sync_batch_size
@@ -348,72 +712,156 @@ class RagicSyncService:
         for i in range(0, len(values), batch_size):
             batch = values[i:i + batch_size]
             
-            # PostgreSQL upsert
-            stmt = pg_insert(AdministrativeEmployee).values(batch)
+            # PostgreSQL upsert - use ragic_id as the conflict key (primary key)
+            stmt = pg_insert(AdministrativeAccount).values(batch)
+            
+            # Build update dict for all non-primary-key columns
+            update_dict = {
+                col.name: getattr(stmt.excluded, col.name)
+                for col in AdministrativeAccount.__table__.columns
+                if col.name != "ragic_id"
+            }
+            
             stmt = stmt.on_conflict_do_update(
-                index_elements=["email"],
-                set_={
-                    "name": stmt.excluded.name,
-                    "department_name": stmt.excluded.department_name,
-                    "supervisor_email": stmt.excluded.supervisor_email,
-                    "ragic_id": stmt.excluded.ragic_id,
-                },
+                index_elements=["ragic_id"],
+                set_=update_dict,
             )
             
             await session.execute(stmt)
             total_upserted += len(batch)
-            logger.debug(f"Upserted employee batch {i//batch_size + 1}: {len(batch)} records")
+            logger.debug(f"Upserted account batch {i//batch_size + 1}: {len(batch)} records")
         
-        return total_upserted
+        return total_upserted, skipped
 
-    async def _upsert_departments(
-        self, records: list[dict[str, Any]], session: AsyncSession
-    ) -> int:
+    # =========================================================================
+    # Step 4b: Leave Type Sync
+    # =========================================================================
+
+    def _transform_leave_type_record(self, record: dict[str, Any]) -> dict[str, Any] | None:
         """
-        Upsert department records into the cache table.
-        
-        Uses PostgreSQL INSERT ... ON CONFLICT DO UPDATE.
+        Transform a raw Ragic leave type record into a format for database insertion.
         
         Args:
-            records: List of Ragic records.
+            record: Raw record from Ragic API with field ID keys.
+            
+        Returns:
+            dict with model field names and typed values, or None if invalid.
+        """
+        try:
+            ragic_id = parse_int(record.get(LeaveTypeFields.RAGIC_ID)) or record.get("_ragicId")
+            leave_type_code = parse_string(record.get(LeaveTypeFields.LEAVE_TYPE_CODE))
+            leave_type_name = parse_string(record.get(LeaveTypeFields.LEAVE_TYPE_NAME))
+            
+            if not ragic_id or not leave_type_code or not leave_type_name:
+                logger.warning(f"Skipping leave type record with missing required fields: {record}")
+                return None
+            
+            return {
+                "ragic_id": ragic_id,
+                "leave_type_code": leave_type_code,
+                "leave_type_name": leave_type_name,
+                "deduction_multiplier": parse_float(record.get(LeaveTypeFields.DEDUCTION_MULTIPLIER)),
+            }
+        except Exception as e:
+            logger.warning(f"Failed to transform leave type record: {e}")
+            return None
+
+    async def _upsert_leave_types(
+        self,
+        records: list[dict[str, Any]],
+        session: AsyncSession,
+    ) -> tuple[int, int]:
+        """
+        Upsert leave type records into the database.
+        
+        Args:
+            records: List of raw Ragic records.
             session: Database session.
             
         Returns:
-            Number of records processed.
+            tuple of (upserted_count, skipped_count).
         """
         if not records:
-            return 0
+            logger.info("No leave type records to sync")
+            return 0, 0
 
-        values = []
+        transformed = []
+        skipped = 0
+
         for record in records:
-            name = record.get(self._settings.field_department_name, "").strip()
-            if not name:
-                logger.warning(f"Skipping department record without name: {record}")
-                continue
-            
-            values.append({
-                "name": name,
-                "manager_email": record.get(
-                    self._settings.field_department_manager_email, ""
-                ).strip() or None,
-                "ragic_id": record.get("_ragicId"),
-            })
+            data = self._transform_leave_type_record(record)
+            if data:
+                transformed.append(data)
+            else:
+                skipped += 1
 
-        if not values:
-            return 0
+        if not transformed:
+            logger.warning("All leave type records were invalid, nothing to sync")
+            return 0, skipped
 
-        # PostgreSQL upsert
-        stmt = pg_insert(AdministrativeDepartment).values(values)
+        # PostgreSQL upsert - use ragic_id as the conflict key
+        stmt = pg_insert(LeaveType).values(transformed)
+        
+        update_dict = {
+            col.name: getattr(stmt.excluded, col.name)
+            for col in LeaveType.__table__.columns
+            if col.name != "ragic_id"
+        }
+        
         stmt = stmt.on_conflict_do_update(
-            index_elements=["name"],
-            set_={
-                "manager_email": stmt.excluded.manager_email,
-                "ragic_id": stmt.excluded.ragic_id,
-            },
+            index_elements=["ragic_id"],
+            set_=update_dict,
         )
         
         await session.execute(stmt)
-        return len(values)
+        logger.info(f"Upserted {len(transformed)} leave type records")
+        
+        return len(transformed), skipped
+
+    async def sync_leave_types(self) -> dict[str, Any]:
+        """
+        Synchronize leave type data from Ragic to local cache.
+        
+        Returns:
+            dict with sync results.
+        """
+        logger.info("Starting leave type synchronization...")
+        
+        result = {
+            "leave_types_synced": 0,
+            "leave_types_skipped": 0,
+        }
+
+        try:
+            if not self._settings.ragic_url_leave_type:
+                logger.warning("Leave type URL not configured, skipping sync")
+                return result
+
+            # Ensure tables exist
+            await self._ensure_tables_exist()
+
+            # Fetch and sync data
+            async with get_thread_local_session() as session:
+                leave_type_records = await self._fetch_form_data(
+                    self._settings.ragic_url_leave_type
+                )
+                synced, skipped = await self._upsert_leave_types(
+                    leave_type_records, session
+                )
+                result["leave_types_synced"] = synced
+                result["leave_types_skipped"] = skipped
+
+            logger.info(
+                f"Leave type sync completed: "
+                f"{result['leave_types_synced']} types synced, "
+                f"{result['leave_types_skipped']} skipped"
+            )
+
+        except Exception as e:
+            logger.exception(f"Leave type sync failed: {e}")
+            raise
+
+        return result
 
     # =========================================================================
     # Public API
@@ -431,26 +879,26 @@ class RagicSyncService:
         Returns:
             dict with sync results:
                 - schema_issues: Any field mapping issues found
-                - employees_synced: Number of employee records synced
-                - departments_synced: Number of department records synced
+                - accounts_synced: Number of account records synced
+                - accounts_skipped: Number of records skipped due to validation
                 
         Example:
             service = RagicSyncService()
             result = await service.sync_all_data()
-            print(f"Synced {result['employees_synced']} employees")
+            print(f"Synced {result['accounts_synced']} accounts")
         """
-        logger.info("Starting Ragic data synchronization...")
+        logger.info("Starting Ragic Account data synchronization...")
         
         result = {
-            "schema_issues": {},
-            "employees_synced": 0,
-            "departments_synced": 0,
+            "schema_issues": [],
+            "accounts_synced": 0,
+            "accounts_skipped": 0,
         }
 
         try:
             # Step 1: Validate schema (non-blocking, just logs warnings)
             result["schema_issues"] = await self._validate_field_mappings()
-            if any(result["schema_issues"].values()):
+            if result["schema_issues"]:
                 logger.warning(
                     f"Schema validation issues detected: {result['schema_issues']}. "
                     "Proceeding with sync anyway - data may be incomplete."
@@ -459,28 +907,27 @@ class RagicSyncService:
             # Step 2: Ensure tables exist
             await self._ensure_tables_exist()
 
-            # Step 3: Fetch and sync data
+            # Step 3: Fetch and sync account data
             async with get_thread_local_session() as session:
-                # Sync Employees
-                employee_records = await self._fetch_form_data(
-                    self._settings.ragic_url_employee
+                account_records = await self._fetch_form_data(
+                    self._settings.ragic_url_account
                 )
-                result["employees_synced"] = await self._upsert_employees(
-                    employee_records, session
+                synced, skipped = await self._upsert_accounts(
+                    account_records, session
                 )
-                
-                # Sync Departments
-                department_records = await self._fetch_form_data(
-                    self._settings.ragic_url_dept
-                )
-                result["departments_synced"] = await self._upsert_departments(
-                    department_records, session
-                )
+                result["accounts_synced"] = synced
+                result["accounts_skipped"] = skipped
+
+            # Step 4: Sync leave types
+            leave_type_result = await self.sync_leave_types()
+            result["leave_types_synced"] = leave_type_result.get("leave_types_synced", 0)
+            result["leave_types_skipped"] = leave_type_result.get("leave_types_skipped", 0)
 
             logger.info(
                 f"Ragic sync completed: "
-                f"{result['employees_synced']} employees, "
-                f"{result['departments_synced']} departments"
+                f"{result['accounts_synced']} accounts synced, "
+                f"{result['accounts_skipped']} skipped, "
+                f"{result['leave_types_synced']} leave types synced"
             )
 
         except Exception as e:

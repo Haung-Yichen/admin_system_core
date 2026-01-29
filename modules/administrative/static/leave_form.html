@@ -10,7 +10,7 @@
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 
     <!-- App Logic (External JS to bypass CSP inline script restrictions) -->
-    <script src="/api/administrative/liff/leave_form.js?v=v6_security_fix"></script>
+    <script src="/api/administrative/liff/leave_form.js?v=v9_workdays_post"></script>
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -163,6 +163,7 @@
         /* Form Group */
         .form-group {
             margin-bottom: 20px;
+            min-width: 0;
         }
 
         .form-group:last-child {
@@ -184,6 +185,11 @@
 
         .form-input {
             width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            inline-size: 100%;
+            max-inline-size: 100%;
+            display: block;
             padding: 14px 16px;
             font-size: 1rem;
             font-family: inherit;
@@ -222,6 +228,82 @@
             background-repeat: no-repeat;
             background-position: right 16px center;
             padding-right: 40px;
+        }
+
+        /* Workdays Checkbox List */
+        .workdays-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+            padding: 4px 0;
+        }
+
+        .workday-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: var(--bg);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .workday-item:hover {
+            background: #e8f5e9;
+        }
+
+        .workday-item.selected {
+            background: #e8f5e9;
+            border-left: 3px solid var(--accent);
+        }
+
+        .workday-checkbox {
+            width: 22px;
+            height: 22px;
+            accent-color: var(--accent);
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .workday-label {
+            font-size: 1rem;
+            color: var(--text);
+            cursor: pointer;
+            flex: 1;
+        }
+
+        .workday-weekday {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+
+        .workdays-actions {
+            display: flex;
+            gap: 16px;
+            margin-top: 8px;
+        }
+
+        .btn-link {
+            background: none;
+            border: none;
+            color: var(--accent);
+            font-size: 0.875rem;
+            cursor: pointer;
+            padding: 4px 0;
+            text-decoration: underline;
+        }
+
+        .btn-link:hover {
+            color: var(--accent-hover);
+        }
+
+        .workdays-loading {
+            text-align: center;
+            padding: 20px;
+            color: var(--text-muted);
         }
 
         /* User Info Display */
@@ -370,6 +452,52 @@
             margin-bottom: 32px;
         }
 
+        /* Date Row Layout - Using Grid for perfect 50/50 split */
+        .date-row {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr)); /* Force equal width even if content is wide */
+            gap: 10px; /* Optimized gap */
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        .date-col {
+            min-width: 0; /* Prevents grid blowout */
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Input specific tweaks for date fields */
+        input[type="date"].form-input {
+            width: 100%;
+            min-width: 0;
+            text-align: center;
+            padding-left: 2px;  /* Minimal padding */
+            padding-right: 2px;
+            font-size: 0.9rem;
+            margin: 0;
+            box-sizing: border-box;
+            -webkit-appearance: none; /* Crucial for iOS */
+            appearance: none;
+        }
+
+        /* Responsive Improvements - Only keep general adjustments */
+        @media (max-width: 768px) {
+            .form-container {
+                padding: 16px;
+            }
+
+            .card {
+                padding: 20px;
+            }
+            
+            /* REMOVED the restrictive .date-col flex settings here */
+            /* Grid handles the layout automatically now */
+        }
+
         /* Utilities */
         .hidden {
             display: none !important;
@@ -447,17 +575,31 @@
                     </div>
                 </div>
                 <div class="user-info-item">
-                    <div class="user-info-icon">🏢</div>
-                    <div class="user-info-content">
-                        <div class="user-info-label">部門</div>
-                        <div class="user-info-value" id="user-dept">-</div>
-                    </div>
-                </div>
-                <div class="user-info-item">
                     <div class="user-info-icon">✉️</div>
                     <div class="user-info-content">
                         <div class="user-info-label">Email</div>
                         <div class="user-info-value" id="user-email">-</div>
+                    </div>
+                </div>
+                <div class="user-info-item">
+                    <div class="user-info-icon">🏬</div>
+                    <div class="user-info-content">
+                        <div class="user-info-label">營業部</div>
+                        <div class="user-info-value" id="user-sales-dept">-</div>
+                    </div>
+                </div>
+                <div class="user-info-item">
+                    <div class="user-info-icon">👔</div>
+                    <div class="user-info-content">
+                        <div class="user-info-label">營業部負責人</div>
+                        <div class="user-info-value" id="user-sales-dept-manager">-</div>
+                    </div>
+                </div>
+                <div class="user-info-item">
+                    <div class="user-info-icon">👨‍💼</div>
+                    <div class="user-info-content">
+                        <div class="user-info-label">直屬主管</div>
+                        <div class="user-info-value" id="user-direct-supervisor">-</div>
                     </div>
                 </div>
             </div>
@@ -471,31 +613,29 @@
                 <div class="form-group">
                     <label class="form-label required" for="leave-type">請假類別</label>
                     <select id="leave-type" class="form-input" required>
-                        <option value="">請選擇假別</option>
-                        <option value="annual">特休假</option>
-                        <option value="personal">事假</option>
-                        <option value="sick">病假</option>
-                        <option value="official">公假</option>
-                        <option value="marriage">婚假</option>
-                        <option value="funeral">喪假</option>
-                        <option value="maternity">產假</option>
-                        <option value="paternity">陪產假</option>
+                        <option value="">載入中...</option>
                     </select>
                 </div>
 
-                <div class="form-group">
-                    <label class="form-label required" for="leave-date">請假日期</label>
-                    <input type="date" id="leave-date" class="form-input" required>
+                <div class="form-group date-row">
+                    <div class="date-col">
+                        <label class="form-label required" for="start-date">起始日期</label>
+                        <input type="date" id="start-date" class="form-input" required>
+                    </div>
+                    <div class="date-col">
+                        <label class="form-label required" for="end-date">結束日期</label>
+                        <input type="date" id="end-date" class="form-input" required>
+                    </div>
                 </div>
 
-                <div class="form-group" style="display: flex; gap: 12px;">
-                    <div style="flex: 1;">
-                        <label class="form-label" for="start-time">開始時間</label>
-                        <input type="time" id="start-time" class="form-input" value="09:00">
+                <div class="form-group" id="workdays-container" style="display: none;">
+                    <label class="form-label">請假日期 (排除週末)</label>
+                    <div id="workdays-list" class="workdays-list">
+                        <!-- Dynamic checkboxes will be inserted here -->
                     </div>
-                    <div style="flex: 1;">
-                        <label class="form-label" for="end-time">結束時間</label>
-                        <input type="time" id="end-time" class="form-input" value="18:00">
+                    <div class="workdays-actions">
+                        <button type="button" class="btn-link" onclick="selectAllDays()">全選</button>
+                        <button type="button" class="btn-link" onclick="deselectAllDays()">取消全選</button>
                     </div>
                 </div>
 

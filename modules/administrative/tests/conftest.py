@@ -5,6 +5,7 @@ Provides shared fixtures for unit testing the administrative module.
 """
 
 import pytest
+from datetime import date
 from unittest.mock import AsyncMock, MagicMock
 from pydantic import SecretStr
 
@@ -25,14 +26,7 @@ def mock_admin_settings():
     """Create mock AdminSettings for testing."""
     settings = MagicMock()
     settings.ragic_api_key = SecretStr("test_api_key")
-    settings.ragic_url_employee = "https://ragic.example.com/employee"
-    settings.ragic_url_dept = "https://ragic.example.com/department"
-    settings.field_employee_email = "1001132"
-    settings.field_employee_name = "1001129"
-    settings.field_employee_department = "1001194"
-    settings.field_employee_supervisor_email = "1001182"
-    settings.field_department_name = "1002508"
-    settings.field_department_manager_email = "1002509"
+    settings.ragic_url_account = "https://ragic.example.com/account"
     settings.sync_timeout_seconds = 30
     settings.sync_batch_size = 100
     settings.line_channel_secret = SecretStr("test_channel_secret")
@@ -42,46 +36,46 @@ def mock_admin_settings():
 
 
 @pytest.fixture
-def sample_employee_data():
-    """Sample employee data for testing."""
+def sample_account_data():
+    """Sample account data for testing."""
     return {
-        "email": "test@example.com",
-        "name": "Test User",
-        "department_name": "Engineering",
-        "supervisor_email": "manager@example.com",
         "ragic_id": 123,
+        "account_id": "A001",
+        "name": "Test User",
+        "status": True,
+        "emails": "test@example.com",
+        "org_code": "ORG001",
+        "org_name": "Engineering",
+        "rank_code": "R01",
+        "rank_name": "Manager",
+        "mentor_id_card": "A123456789",
+        "mentor_name": "Jane Manager",
+        "sales_dept": "Sales North",
+        "sales_dept_manager": "Bob Director",
     }
 
 
 @pytest.fixture
-def sample_department_data():
-    """Sample department data for testing."""
-    return {
-        "name": "Engineering",
-        "manager_email": "eng_manager@example.com",
-        "ragic_id": 1,
-    }
-
-
-@pytest.fixture
-def sample_ragic_employee_record():
-    """Sample Ragic employee record (with field IDs)."""
+def sample_ragic_account_record():
+    """Sample Ragic account record (with field IDs)."""
     return {
         "_ragicId": 123,
-        "1001132": "test@example.com",  # email
-        "1001129": "Test User",  # name
-        "1001194": "Engineering",  # department
-        "1001182": "manager@example.com",  # supervisor
-    }
-
-
-@pytest.fixture
-def sample_ragic_department_record():
-    """Sample Ragic department record (with field IDs)."""
-    return {
-        "_ragicId": 1,
-        "1002508": "Engineering",  # name
-        "1002509": "eng_manager@example.com",  # manager
+        "1005971": "123",  # ragic_id
+        "1005972": "A001",  # account_id
+        "1005975": "Test User",  # name
+        "1005974": "1",  # status (active)
+        "1005977": "test@example.com",  # emails
+        "1005978": "ORG001",  # org_code
+        "1006049": "Engineering",  # org_name
+        "1005979": "R01",  # rank_code
+        "1006050": "Manager",  # rank_name
+        "1005981": "A123456789",  # mentor_id_card
+        "1006043": "Jane Manager",  # mentor_name
+        "1006058": "Sales North",  # sales_dept
+        "1006059": "Bob Director",  # sales_dept_manager
+        "1006016": "2020-01-15",  # approval_date
+        "1006017": "2020-02-01",  # effective_date
+        "1005982": "0.85",  # assessment_rate
     }
 
 

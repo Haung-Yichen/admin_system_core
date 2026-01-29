@@ -16,7 +16,7 @@
     
     // Debug logging
     const debugLogs = [];
-    const DEBUG_MODE = false;
+    const DEBUG_MODE = false;  // Set to true for debugging
     
     function createDebugOverlay() {
         if (document.getElementById('debug-overlay')) return;
@@ -75,6 +75,59 @@
         }
     }
     
+    // Load leave types from backend
+    async function loadLeaveTypes() {
+        try {
+            debugLog('Loading leave types...');
+            const response = await fetchWithTimeout(`${API_BASE_URL}/api/administrative/leave/types`);
+            
+            if (!response.ok) {
+                debugLog('Failed to load leave types: HTTP ' + response.status, true);
+                // Fall back to default options
+                populateDefaultLeaveTypes();
+                return;
+            }
+            
+            const data = await response.json();
+            const selectEl = document.getElementById('leave-type');
+            
+            // Clear existing options
+            selectEl.innerHTML = '<option value="">請選擇假別</option>';
+            
+            if (data.leave_types && data.leave_types.length > 0) {
+                data.leave_types.forEach(lt => {
+                    const option = document.createElement('option');
+                    option.value = lt.name;  // 使用假別名稱作為 value，確保 POST 到 Ragic 時能匹配下拉選項
+                    option.textContent = lt.name;
+                    selectEl.appendChild(option);
+                });
+                debugLog('Loaded ' + data.leave_types.length + ' leave types');
+            } else {
+                debugLog('No leave types returned, using defaults', true);
+                populateDefaultLeaveTypes();
+            }
+            
+        } catch (error) {
+            debugLog('Load leave types error: ' + error.message, true);
+            populateDefaultLeaveTypes();
+        }
+    }
+    
+    // Fallback default leave types
+    function populateDefaultLeaveTypes() {
+        const selectEl = document.getElementById('leave-type');
+        selectEl.innerHTML = `
+            <option value="">請選擇假別</option>
+            <option value="特休">特休</option>
+            <option value="事假">事假</option>
+            <option value="全薪病假">全薪病假</option>
+            <option value="補休">補休</option>
+            <option value="外出單">外出單</option>
+            <option value="生理假">生理假</option>
+            <option value="因公出差">因公出差</option>
+        `;
+    }
+    
     // Initialize LIFF
     async function initializeLiff() {
         createDebugOverlay();
@@ -89,6 +142,8 @@
             userId = testUser;
             userProfile = { displayName: 'Dev User' };
             idToken = 'dev_mode_token';
+            document.querySelector('.loading-text').textContent = '開發模式：載入假別選項...';
+            await loadLeaveTypes();
             document.querySelector('.loading-text').textContent = '開發模式：載入測試資料...';
             await loadUserData();
             return;
@@ -175,6 +230,9 @@
             
             debugLog('ID Token obtained successfully');
             
+            document.querySelector('.loading-text').textContent = '正在載入假別選項...';
+            await loadLeaveTypes();
+            
             document.querySelector('.loading-text').textContent = '正在載入使用者資料...';
             await loadUserData();
             
@@ -249,21 +307,146 @@
             debugLog('User data loaded successfully');
             
             document.getElementById('user-name').textContent = data.name || '-';
-            document.getElementById('user-dept').textContent = data.department || '-';
             document.getElementById('user-email').textContent = data.email || '-';
+            // Extended applicant info
+            document.getElementById('user-sales-dept').textContent = data.sales_dept || '-';
+            document.getElementById('user-sales-dept-manager').textContent = data.sales_dept_manager || '-';
+            document.getElementById('user-direct-supervisor').textContent = data.direct_supervisor || '-';
             
-            // Set default date to tomorrow
+            // Set default dates (start: tomorrow, end: tomorrow)
             const tomorrow = new Date();
             tomorrow.setDate(tomorrow.getDate() + 1);
-            document.getElementById('leave-date').value = tomorrow.toISOString().split('T')[0];
+            const tomorrowStr = tomorrow.toISOString().split('T')[0];
+            document.getElementById('start-date').value = tomorrowStr;
+            document.getElementById('end-date').value = tomorrowStr;
+            
+            // Setup date change listeners
+            document.getElementById('start-date').addEventListener('change', onDateRangeChange);
+            document.getElementById('end-date').addEventListener('change', onDateRangeChange);
             
             showForm();
+            
+            // Trigger initial workdays load
+            await onDateRangeChange();
             
         } catch (error) {
             debugLog('Load user data error: ' + error.message, true);
             showError(`載入資料失敗: ${error.message}`);
         }
     }
+    
+    // Handle date range change - fetch workdays from backend
+    async function onDateRangeChange() {
+        const startDate = document.getElementById('start-date').value;
+        const endDate = document.getElementById('end-date').value;
+        
+        debugLog(`Date range change: start=${startDate}, end=${endDate}`);
+        
+        if (!startDate || !endDate) {
+            debugLog('Missing date, hiding workdays container');
+            document.getElementById('workdays-container').style.display = 'none';
+            return;
+        }
+        
+        // Validate date range
+        if (new Date(startDate) > new Date(endDate)) {
+            debugLog('Invalid date range (start > end), hiding container');
+            document.getElementById('workdays-container').style.display = 'none';
+            return;
+        }
+        
+        const container = document.getElementById('workdays-container');
+        const listEl = document.getElementById('workdays-list');
+        
+        container.style.display = 'block';
+        listEl.innerHTML = '<div class="workdays-loading">載入工作日...</div>';
+        
+        try {
+            // Use POST to avoid LINE Browser URL validation issues
+            const url = `${API_BASE_URL}/api/administrative/leave/workdays`;
+            debugLog(`Fetching workdays (POST) for ${startDate} to ${endDate}`);
+            
+            const response = await fetchWithTimeout(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ start_date: startDate, end_date: endDate })
+            });
+            
+            debugLog(`Workdays response status: ${response.status}`);
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                debugLog(`Workdays error response: ${errorText}`, true);
+                throw new Error('Failed to fetch workdays');
+            }
+            
+            const data = await response.json();
+            debugLog(`Workdays received: ${data.workdays ? data.workdays.length : 0} days`);
+            renderWorkdays(data.workdays);
+            
+        } catch (error) {
+            debugLog('Fetch workdays error: ' + error.message, true);
+            listEl.innerHTML = '<div class="workdays-loading" style="color: var(--danger);">無法載入工作日</div>';
+        }
+    }
+    
+    // Render workday checkboxes
+    function renderWorkdays(workdays) {
+        const listEl = document.getElementById('workdays-list');
+        
+        if (!workdays || workdays.length === 0) {
+            listEl.innerHTML = '<div class="workdays-loading">此日期範圍內沒有工作日</div>';
+            return;
+        }
+        
+        const weekdayNames = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
+        
+        listEl.innerHTML = workdays.map((day, index) => {
+            const date = new Date(day.date);
+            const weekday = weekdayNames[date.getDay()];
+            const displayDate = `${date.getMonth() + 1}/${date.getDate()} (${weekday})`;
+            
+            return `
+                <label class="workday-item" for="workday-${index}">
+                    <input type="checkbox" 
+                           class="workday-checkbox" 
+                           id="workday-${index}" 
+                           name="workdays" 
+                           value="${day.date}"
+                           onchange="updateWorkdayStyle(this)">
+                    <span class="workday-label">${displayDate}</span>
+                </label>
+            `;
+        }).join('');
+        
+        debugLog(`Rendered ${workdays.length} workday checkboxes`);
+    }
+    
+    // Update checkbox item style
+    window.updateWorkdayStyle = function(checkbox) {
+        const item = checkbox.closest('.workday-item');
+        if (checkbox.checked) {
+            item.classList.add('selected');
+        } else {
+            item.classList.remove('selected');
+        }
+    };
+    
+    // Select all days
+    window.selectAllDays = function() {
+        document.querySelectorAll('.workday-checkbox').forEach(cb => {
+            cb.checked = true;
+            updateWorkdayStyle(cb);
+        });
+    };
+    
+    // Deselect all days
+    window.deselectAllDays = function() {
+        document.querySelectorAll('.workday-checkbox').forEach(cb => {
+            cb.checked = false;
+            updateWorkdayStyle(cb);
+        });
+    };
     
     // Submit form - make it globally available
     window.submitForm = async function(event) {
@@ -274,11 +457,17 @@
         submitBtn.innerHTML = '<span class="spinner" style="width:20px;height:20px;border-width:2px;"></span><span>處理中...</span>';
         
         try {
+            // Collect selected workdays
+            const selectedDays = Array.from(document.querySelectorAll('.workday-checkbox:checked'))
+                .map(cb => cb.value);
+            
+            if (selectedDays.length === 0) {
+                throw new Error('請至少選擇一個請假日期');
+            }
+            
             const formData = {
-                leave_date: document.getElementById('leave-date').value,
+                leave_dates: selectedDays,
                 leave_type: document.getElementById('leave-type').value,
-                start_time: document.getElementById('start-time').value,
-                end_time: document.getElementById('end-time').value,
                 reason: document.getElementById('reason').value,
             };
             

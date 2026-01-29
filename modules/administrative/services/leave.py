@@ -11,6 +11,7 @@ the employee profile from the local cache.
 
 import logging
 import os
+import time
 from typing import Any
 
 import httpx
@@ -18,15 +19,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_standalone_session
-from modules.administrative.core.config import AdminSettings, get_admin_settings
-from modules.administrative.models import AdministrativeEmployee, AdministrativeDepartment
+from modules.administrative.core.config import (
+    AdminSettings,
+    RagicLeaveFieldMapping,
+    get_admin_settings,
+)
+from modules.administrative.models import AdministrativeAccount, LeaveType
+from modules.administrative.services.email_notification import get_email_notification_service
 
 logger = logging.getLogger(__name__)
 
 # Environment flag to skip authentication for development/testing
 DEBUG_SKIP_AUTH = os.environ.get(
     "DEBUG_SKIP_AUTH", "").lower() in ("true", "1", "yes")
-
 
 class LeaveError(Exception):
     """Base exception for leave-related errors."""
@@ -35,11 +40,6 @@ class LeaveError(Exception):
 
 class EmployeeNotFoundError(LeaveError):
     """Raised when employee profile not found in cache."""
-    pass
-
-
-class DepartmentNotFoundError(LeaveError):
-    """Raised when department not found in cache."""
     pass
 
 
@@ -54,11 +54,11 @@ class LeaveService:
 
     This service receives verified email addresses from the Router layer
     (authenticated via LINE ID Token) and uses them to look up employee
-    profiles from the local cache.
+    profiles from the local cache (AdministrativeAccount).
 
     Flow:
         1. Router verifies LINE ID Token -> Email
-        2. Email -> Module Cache -> Employee Profile (Supervisor, Dept)
+        2. Email -> Module Cache -> Account Profile (includes org info)
         3. Construct payload and submit to Ragic
     """
 
@@ -74,6 +74,9 @@ class LeaveService:
         """
         self._settings = settings or get_admin_settings()
         self._http_client: httpx.AsyncClient | None = None
+        self._form_schema_cache: dict[str, Any] | None = None
+        self._schema_cache_time: float = 0
+        self._schema_cache_ttl: int = 300  # 5 minutes cache
 
     @property
     def _client(self) -> httpx.AsyncClient:
@@ -95,62 +98,319 @@ class LeaveService:
             self._http_client = None
 
     # =========================================================================
-    # Employee Profile Lookup
+    # Account Profile Lookup
     # =========================================================================
 
-    async def _get_employee_profile(
+    async def _get_account_by_email(
         self, email: str, db: AsyncSession
-    ) -> AdministrativeEmployee:
+    ) -> AdministrativeAccount:
         """
-        Get employee profile from local cache by email.
+        Get account profile from local cache by email.
 
+        The email is matched against the comma-separated emails field.
+        
         Args:
             email: Employee email address.
             db: Database session.
 
         Returns:
-            AdministrativeEmployee record.
+            AdministrativeAccount record.
 
         Raises:
             EmployeeNotFoundError: If not found in cache.
         """
+        # Try exact match first (emails field contains the email)
         result = await db.execute(
-            select(AdministrativeEmployee).where(
-                AdministrativeEmployee.email == email)
+            select(AdministrativeAccount).where(
+                AdministrativeAccount.emails.like(f"%{email}%")
+            )
         )
-        employee = result.scalar_one_or_none()
+        account = result.scalar_one_or_none()
 
-        if employee is None:
-            logger.warning(f"Employee not found in cache: {email}")
+        if account is None:
+            logger.warning(f"Account not found in cache for email: {email}")
             raise EmployeeNotFoundError(
-                f"Employee profile not found for {email}. "
+                f"Account profile not found for {email}. "
                 "Please ensure Ragic data has been synced."
             )
 
-        return employee
+        return account
 
-    async def _get_department(
-        self, department_name: str, db: AsyncSession
-    ) -> AdministrativeDepartment | None:
+    async def _get_account_by_id(
+        self, account_id: str, db: AsyncSession
+    ) -> AdministrativeAccount | None:
         """
-        Get department from local cache by name.
-
+        Get account profile from local cache by account_id.
+        
         Args:
-            department_name: Department name.
+            account_id: Account ID (帳號).
             db: Database session.
 
         Returns:
-            AdministrativeDepartment or None if not found.
+            AdministrativeAccount or None if not found.
         """
-        if not department_name:
+        if not account_id:
             return None
 
         result = await db.execute(
-            select(AdministrativeDepartment).where(
-                AdministrativeDepartment.name == department_name
+            select(AdministrativeAccount).where(
+                AdministrativeAccount.account_id == account_id
             )
         )
         return result.scalar_one_or_none()
+
+    async def _get_mentor_account(
+        self, mentor_id_card: str, db: AsyncSession
+    ) -> AdministrativeAccount | None:
+        """
+        Get mentor's account from local cache by ID card number.
+        
+        Args:
+            mentor_id_card: Mentor's ID card number (身份證字號).
+            db: Database session.
+
+        Returns:
+            AdministrativeAccount or None if not found.
+        """
+        if not mentor_id_card:
+            return None
+
+        result = await db.execute(
+            select(AdministrativeAccount).where(
+                AdministrativeAccount.id_card_number == mentor_id_card
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def _get_account_by_name(
+        self, name: str, db: AsyncSession
+    ) -> AdministrativeAccount | None:
+        """
+        Get account profile from local cache by name.
+        
+        Used to find manager emails when we only have their name.
+        
+        Args:
+            name: Person's name (姓名).
+            db: Database session.
+
+        Returns:
+            AdministrativeAccount or None if not found.
+        """
+        if not name:
+            return None
+
+        result = await db.execute(
+            select(AdministrativeAccount).where(
+                AdministrativeAccount.name == name,
+                AdministrativeAccount.status == True  # Only active accounts
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def _get_manager_email(
+        self, manager_name: str, db: AsyncSession
+    ) -> str | None:
+        """
+        Get manager's email by looking up their name in the account table.
+        
+        This is used to find the email for sales_dept_manager and direct_supervisor
+        when we only have their names stored in the applicant's record.
+        
+        Args:
+            manager_name: Manager's name (姓名).
+            db: Database session.
+
+        Returns:
+            Manager's primary email or None if not found.
+        """
+        if not manager_name:
+            return None
+
+        account = await self._get_account_by_name(manager_name, db)
+        if account:
+            return account.primary_email
+        
+        logger.warning(f"Manager account not found for name: {manager_name}")
+        return None
+
+    # =========================================================================
+    # Helper Methods
+    # =========================================================================
+    
+    async def _get_leave_form_schema(self) -> dict[str, Any]:
+        """
+        Fetch leave form schema from Ragic to validate options.
+        Uses simple caching to reduce API calls.
+        """
+        current_time = time.time()
+        if (self._form_schema_cache and 
+            current_time - self._schema_cache_time < self._schema_cache_ttl):
+            return self._form_schema_cache
+            
+        url = f"{self._settings.ragic_url_leave}?info=1"
+        try:
+            logger.info(f"Fetching Ragic form schema from {url}")
+            response = await self._client.get(url)
+            response.raise_for_status()
+            self._form_schema_cache = response.json()
+            self._schema_cache_time = current_time
+            return self._form_schema_cache
+        except Exception as e:
+            logger.error(f"Failed to fetch Ragic form schema: {e}")
+            # Return empty schema or previous cache on failure
+            return self._form_schema_cache or {}
+
+    async def _resolve_selection_option(
+        self, 
+        field_id: str, 
+        target_value: str,
+        default_value: str | None = None
+    ) -> str:
+        """
+        Check if target_value is valid for the given field in Ragic.
+        Return the exact string from Ragic if found, to avoid substring/case issues.
+        """
+        schema = await self._get_leave_form_schema()
+        
+        # Schema structure in Ragic ?info=1:
+        # It returns a dictionary where keys are field IDs (sometimes) or indices.
+        # But commonly the response provided by Ragic for ?info=1 is keyed by field ID.
+        # However, to be safe, we iterate.
+        
+        field_def = None
+        
+        # Try direct lookup if possible
+        if field_id in schema:
+             field_def = schema[field_id]
+        else:
+            # Fallback iteration
+            for key, val in schema.items():
+                if isinstance(val, dict) and str(val.get("id", "")) == field_id:
+                    field_def = val
+                    break
+        
+        if not field_def:
+            logger.warning(f"Field {field_id} not found in Ragic schema, using target '{target_value}' blindly")
+            return target_value
+
+        # Check choices
+        choices = field_def.get("choices")
+        if not choices and "selection" in field_def:
+             choices = field_def.get("selection")
+             
+        if not choices:
+            # Maybe not a selection field or no choices defined
+            return target_value
+            
+        if isinstance(choices, str):
+            choice_list = [c.strip() for c in choices.split(",")]
+        elif isinstance(choices, list):
+            choice_list = choices
+        else:
+            choice_list = []
+
+        # Try exact match first
+        if target_value in choice_list:
+            return target_value
+            
+        # Try case-insensitive specific match
+        for choice in choice_list:
+            if choice.lower() == target_value.lower():
+                return choice
+                
+        # Try substring match (e.g. "審核中" matching "審核中(Processing)")
+        for choice in choice_list:
+            if target_value in choice:
+                return choice
+        
+        logger.warning(
+            f"Value '{target_value}' not found in choices for field {field_id}. "
+            f"Available: {choice_list[:5]}..."
+        )
+        # Fallback to default if provided, else target
+        return default_value if default_value else target_value
+
+    def _extract_chinese_name(self, name: str) -> str:
+        """
+        Extract Chinese name by removing English suffix.
+        
+        Examples:
+            "林文中VP" -> "林文中"
+            "王小明Manager" -> "王小明"
+            "張三" -> "張三"
+        
+        Args:
+            name: Name that may contain English suffix.
+            
+        Returns:
+            Name with English suffix removed.
+        """
+        if not name:
+            return ""
+        
+        import re
+        # Remove English letters and common suffixes at the end
+        # Keep only Chinese characters and numbers at the start
+        result = re.sub(r'[A-Za-z]+$', '', name).strip()
+        return result if result else name
+
+    async def _resolve_leave_type_name(
+        self, leave_type_input: str, db: AsyncSession
+    ) -> str:
+        """
+        Resolve leave type input to exact Ragic option name.
+        
+        Ragic dropdown fields require exact match with option names.
+        This method looks up the leave type from cache and returns
+        the exact name that Ragic expects.
+        
+        Matching logic:
+        1. Exact match on leave_type_code (假別編號)
+        2. Exact match on leave_type_name (請假類別)
+        3. Partial match (contains) on leave_type_name
+        4. If no match, return the original input
+        
+        Args:
+            leave_type_input: User input for leave type (code or name).
+            db: Database session.
+            
+        Returns:
+            Exact leave type name from Ragic, or original input if no match.
+        """
+        if not leave_type_input:
+            return ""
+        
+        # Try exact match by code
+        result = await db.execute(
+            select(LeaveType).where(LeaveType.leave_type_code == leave_type_input)
+        )
+        leave_type = result.scalar_one_or_none()
+        if leave_type:
+            logger.info(f"Leave type resolved by code: {leave_type_input} -> {leave_type.leave_type_name}")
+            return leave_type.leave_type_name
+        
+        # Try exact match by name
+        result = await db.execute(
+            select(LeaveType).where(LeaveType.leave_type_name == leave_type_input)
+        )
+        leave_type = result.scalar_one_or_none()
+        if leave_type:
+            logger.info(f"Leave type exact match: {leave_type_input}")
+            return leave_type.leave_type_name
+        
+        # Try partial match (contains)
+        result = await db.execute(
+            select(LeaveType).where(LeaveType.leave_type_name.like(f"%{leave_type_input}%"))
+        )
+        leave_type = result.scalar_one_or_none()
+        if leave_type:
+            logger.info(f"Leave type partial match: {leave_type_input} -> {leave_type.leave_type_name}")
+            return leave_type.leave_type_name
+        
+        # No match found, return original (may cause Ragic to show empty)
+        logger.warning(f"Leave type not found in cache: {leave_type_input}, using as-is")
+        return leave_type_input
 
     # =========================================================================
     # Public API
@@ -164,7 +424,7 @@ class LeaveService:
 
         This provides the frontend with:
             - Employee name
-            - Department
+            - Organization (org_name)
             - Email
 
         NOTE: Supervisor info is NOT exposed to frontend for security.
@@ -185,179 +445,290 @@ class LeaveService:
         if DEBUG_SKIP_AUTH:
             logger.warning(
                 f"[DEV MODE] Using development bypass for email: {email}")
-            # Try to find any employee in cache for testing
+            # Try to find any account in cache for testing
             try:
                 result = await db.execute(
-                    select(AdministrativeEmployee).limit(1)
+                    select(AdministrativeAccount).where(
+                        AdministrativeAccount.status == True
+                    ).limit(1)
                 )
-                employee = result.scalar_one_or_none()
-                if employee:
+                account = result.scalar_one_or_none()
+                if account:
                     logger.info(
-                        f"[DEV MODE] Using employee from cache: {employee.name}")
+                        f"[DEV MODE] Using account from cache: {account.name}")
+                    # org_name 實際上是直屬主管名稱，需去除英文後綴
+                    direct_supervisor = self._extract_chinese_name(account.org_name or "")
                     return {
-                        "name": employee.name,
-                        "department": employee.department_name or "測試部門",
-                        "email": employee.email or email,
+                        "name": account.name,
+                        "email": account.primary_email or email,
+                        "sales_dept": account.sales_dept or "",
+                        "sales_dept_manager": account.sales_dept_manager or "",
+                        "direct_supervisor": direct_supervisor,
                     }
             except Exception as e:
-                logger.warning(f"[DEV MODE] Failed to fetch employee: {e}")
+                logger.warning(f"[DEV MODE] Failed to fetch account: {e}")
 
             # Return mock test data
             logger.info("[DEV MODE] Using mock test data")
             return {
                 "name": "測試使用者",
-                "department": "測試部門",
                 "email": email,
+                "sales_dept": "測試營業部",
+                "sales_dept_manager": "測試負責人",
+                "direct_supervisor": "測試主管",
             }
 
-        # Production mode - look up employee by email
-        employee = await self._get_employee_profile(email, db)
+        # Production mode - look up account by email
+        account = await self._get_account_by_email(email, db)
 
-        # Return safe data (NO supervisor info exposed to frontend)
+        # org_name 實際上是直屬主管名稱，需去除英文後綴
+        direct_supervisor = self._extract_chinese_name(account.org_name or "")
+
+        # Return safe data (NO supervisor email exposed to frontend, only names)
         return {
-            "name": employee.name,
-            "department": employee.department_name or "",
-            "email": employee.email,
+            "name": account.name,
+            "email": account.primary_email or email,
+            # Extended applicant info
+            "sales_dept": account.sales_dept or "",
+            "sales_dept_manager": account.sales_dept_manager or "",
+            "direct_supervisor": direct_supervisor,
         }
 
     async def submit_leave_request(
         self,
         email: str,
-        leave_date: str,
+        leave_dates: list[str],
         reason: str,
         db: AsyncSession,
         # Additional fields can be added as needed
-        leave_type: str = "annual",  # 假別
-        start_time: str | None = None,
-        end_time: str | None = None,
+        leave_type: str = "特休",  # 假別 (預設為特休)
     ) -> dict[str, Any]:
         """
-        Submit a leave request to Ragic.
+        Submit leave requests to Ragic for multiple dates.
 
         This is the core workflow:
             1. Receive verified email from Router (authenticated via LINE ID Token)
-            2. Fetch employee profile from cache
-            3. Fetch department manager from cache
-            4. Construct Ragic payload with supervisor/manager info
-            5. POST to Ragic Leave Request form
+            2. Fetch account profile from cache
+            3. Fetch mentor info from cache (using mentor_id_card)
+            4. Construct Ragic payload with supervisor info
+            5. POST to Ragic Leave Request form for each date
 
         Args:
             email: Verified user email (from LINE ID Token authentication).
-            leave_date: Leave date (YYYY-MM-DD format).
+            leave_dates: List of leave dates (YYYY-MM-DD format).
             reason: Reason for leave.
             db: Database session.
             leave_type: Type of leave (annual, sick, personal, etc.).
-            start_time: Optional start time.
-            end_time: Optional end time.
 
         Returns:
-            dict with submission result including Ragic record ID.
+            dict with submission result including Ragic record IDs.
 
         Raises:
             EmployeeNotFoundError: If employee not in cache.
             SubmissionError: If Ragic API call fails.
         """
-        logger.info(f"Leave submission from: {email}")
+        logger.info(f"Leave submission from: {email}, dates: {leave_dates}")
 
         # Development mode bypass - use mock data if flag is set
         if DEBUG_SKIP_AUTH:
             logger.warning(
                 f"[DEV MODE] Using development bypass for submission, email: {email}")
-            # Try to find any employee in cache for testing
-            employee = None
+            # Try to find any account in cache for testing
+            account = None
             try:
                 result = await db.execute(
-                    select(AdministrativeEmployee).limit(1)
+                    select(AdministrativeAccount).where(
+                        AdministrativeAccount.status == True
+                    ).limit(1)
                 )
-                employee = result.scalar_one_or_none()
+                account = result.scalar_one_or_none()
             except Exception as e:
-                logger.warning(f"[DEV MODE] Failed to fetch employee: {e}")
+                logger.warning(f"[DEV MODE] Failed to fetch account: {e}")
 
-            if not employee:
+            if not account:
                 # Use mock data for testing
                 logger.info(
-                    "[DEV MODE] Using mock employee data for submission")
+                    "[DEV MODE] Using mock account data for submission")
                 return {
                     "success": True,
-                    "message": "[DEV MODE] 請假申請已模擬送出（尚未實際提交到 Ragic）",
-                    "ragic_id": None,
+                    "message": f"[DEV MODE] 請假申請已模擬送出（{len(leave_dates)} 天，尚未實際提交到 Ragic）",
+                    "ragic_ids": [],
                     "employee": "測試使用者",
-                    "date": leave_date,
+                    "dates": leave_dates,
+                    "total_days": len(leave_dates),
                 }
 
             logger.info(
-                f"[DEV MODE] Leave submission using employee: {employee.name}")
+                f"[DEV MODE] Leave submission using account: {account.name}")
         else:
-            # Production mode - look up employee by verified email
-            employee = await self._get_employee_profile(email, db)
+            # Production mode - look up account by verified email
+            account = await self._get_account_by_email(email, db)
 
-        # Get department manager
-        department = await self._get_department(employee.department_name or "", db)
-        dept_manager_email = department.manager_email if department else None
+        # org_name 實際上是直屬主管名稱，需去除英文後綴
+        direct_supervisor_name = self._extract_chinese_name(account.org_name or "")
+        
+        # 查找直屬主管的 email（用去除英文後綴的名稱查找）
+        direct_supervisor_email = None
+        if direct_supervisor_name:
+            direct_supervisor_email = await self._get_manager_email(direct_supervisor_name, db)
 
-        # Construct Ragic payload
-        # NOTE: Field IDs should be configured in settings
-        payload = {
-            # Employee Info (auto-filled)
-            self._settings.field_employee_email: employee.email,
-            self._settings.field_employee_name: employee.name,
+        # Get sales department manager info
+        # sales_dept_manager field contains the manager's name, need to look up email
+        sales_dept_manager_name = account.sales_dept_manager
+        sales_dept_manager_email = None
+        if sales_dept_manager_name:
+            sales_dept_manager_email = await self._get_manager_email(sales_dept_manager_name, db)
 
-            # Leave Details (from form input)
-            # TODO: Add actual leave form field IDs to config
-            # "LEAVE_DATE_FIELD_ID": leave_date,
-            # "LEAVE_REASON_FIELD_ID": reason,
-            # "LEAVE_TYPE_FIELD_ID": leave_type,
-
-            # Approval Chain (auto-filled from cache)
-            self._settings.field_employee_supervisor_email: employee.supervisor_email or "",
-
-            # Department Manager (auto-filled from cache)
-            self._settings.field_department_manager_email: dept_manager_email or "",
-
-            # Source Flag
-            "_source": "LINE_API",
-        }
+        # Resolve leave type to exact Ragic option name
+        resolved_leave_type = await self._resolve_leave_type_name(leave_type, db)
+        
+        # Resolve approval status (validate against Ragic schema)
+        # This prevents "Selection value invalid" errors by ensuring we send the exact string
+        # Changed from "審核中" to "已上傳" per user request
+        resolved_approval_status = await self._resolve_selection_option(
+            RagicLeaveFieldMapping.APPROVAL_STATUS, 
+            "已上傳"
+        )
+        
+        # Resolve Sales Dept if possible (to ensure exact match with options)
+        resolved_sales_dept = account.sales_dept or ""
+        if resolved_sales_dept:
+            resolved_sales_dept = await self._resolve_selection_option(
+                RagicLeaveFieldMapping.SALES_DEPT,
+                resolved_sales_dept
+            )
 
         # Log payload (without sensitive data)
         logger.info(
-            f"Submitting leave request for {employee.name}: date={leave_date}")
+            f"Submitting leave request for {account.name}: dates={leave_dates}, leave_type={resolved_leave_type}")
 
-        # Submit to Ragic
+        # Submit to Ragic - one record per date
+        ragic_ids = []
+        submitted_dates = []
+        
         try:
-            # TODO: Replace with actual leave request form URL
-            # For now, log the payload for testing
+            # Check if Ragic leave form URL is configured
+            if not self._settings.ragic_url_leave:
+                logger.warning("Ragic leave form URL not configured, skipping submission")
+                return {
+                    "success": True,
+                    "message": f"請假申請已記錄（{len(leave_dates)} 天，Ragic URL 尚未設定）",
+                    "ragic_ids": [],
+                    "employee": account.name,
+                    "dates": leave_dates,
+                    "total_days": len(leave_dates),
+                    "direct_supervisor": direct_supervisor_name,
+                    "sales_dept_manager": sales_dept_manager_name,
+                }
+
+            # Generate leave request number using timestamp (shared across all dates in this submission)
+            leave_request_no = f"LV{int(time.time() * 1000)}"
+            total_leave_days = len(leave_dates)
+            
+            # Get current date for creation date field
+            from datetime import datetime
+            current_date = datetime.now().strftime("%Y-%m-%d")
+            
+            # Combine multiple leave dates with comma separator
+            leave_dates_str = ",".join(leave_dates)
+            
+            # Get start and end dates
+            start_date = leave_dates[0]
+            end_date = leave_dates[-1]
+            
+            # Submit as a single record with comma-separated dates
+            # Construct Ragic payload with actual field IDs
+            # Field IDs from Ragic leave request form at /HSIBAdmSys/ychn-test/3
+            ragic_payload = {
+                # Employee Info
+                RagicLeaveFieldMapping.EMPLOYEE_NAME: account.name,
+                RagicLeaveFieldMapping.EMPLOYEE_EMAIL: account.primary_email or email,
+                RagicLeaveFieldMapping.SALES_DEPT: resolved_sales_dept,
+                
+                # Leave Details
+                RagicLeaveFieldMapping.LEAVE_TYPE: resolved_leave_type,
+                RagicLeaveFieldMapping.LEAVE_DATE: leave_dates_str,  # 請假日期（逗號隔開）
+                RagicLeaveFieldMapping.START_DATE: start_date,  # 起始日期
+                RagicLeaveFieldMapping.END_DATE: end_date,      # 結束日期
+                RagicLeaveFieldMapping.LEAVE_REASON: reason,
+                RagicLeaveFieldMapping.LEAVE_DAYS: total_leave_days,  # 請假天數
+                RagicLeaveFieldMapping.LEAVE_REQUEST_NO: leave_request_no,  # 請假單號
+                RagicLeaveFieldMapping.CREATED_DATE: current_date,  # 建立日期
+                RagicLeaveFieldMapping.APPROVAL_STATUS: resolved_approval_status,  # 審核狀態 (Validated)
+                
+                # Approval Chain - Names (visible fields)
+                RagicLeaveFieldMapping.SALES_DEPT_MANAGER_NAME: sales_dept_manager_name or "",
+                RagicLeaveFieldMapping.DIRECT_SUPERVISOR_NAME: direct_supervisor_name or "",
+                
+                # Approval Chain - Emails (hidden fields for triggering approval workflow)
+                RagicLeaveFieldMapping.SALES_DEPT_MANAGER_EMAIL: sales_dept_manager_email or "",
+                RagicLeaveFieldMapping.DIRECT_SUPERVISOR_EMAIL: direct_supervisor_email or "",
+            }
+            
+            # Log full payload for debugging
+            logger.info(f"Submitting leave request to Ragic: {self._settings.ragic_url_leave}")
+            logger.debug(f"Ragic payload: {ragic_payload}")
+            
+            # Log key fields specifically
             logger.info(
-                f"Leave request payload constructed: {list(payload.keys())}")
+                f"Key fields - leave_type: {ragic_payload.get(RagicLeaveFieldMapping.LEAVE_TYPE)}, "
+                f"leave_dates: {leave_dates_str}, "
+                f"sales_dept: {ragic_payload.get(RagicLeaveFieldMapping.SALES_DEPT)}, "
+                f"name: {ragic_payload.get(RagicLeaveFieldMapping.EMPLOYEE_NAME)}"
+            )
+            
+            response = await self._client.post(
+                self._settings.ragic_url_leave,
+                json=ragic_payload,
+            )
+            response.raise_for_status()
+            result = response.json()
+            ragic_id = result.get("_ragicId")
+            ragic_ids.append(ragic_id)
+            submitted_dates = leave_dates
+            
+            logger.info(f"Leave request submitted successfully, Ragic ID: {ragic_id}")
 
-            # Uncomment when form URL is configured:
-            # response = await self._client.post(
-            #     self._settings.ragic_url_leave_request,
-            #     json=payload,
-            # )
-            # response.raise_for_status()
-            # result = response.json()
-            # ragic_id = result.get("_ragicId")
-
-            # Placeholder response for now
-            ragic_id = None
-
+            logger.info(f"Leave request with {len(submitted_dates)} days submitted successfully")
+            
+            # Send confirmation email to the applicant
+            try:
+                email_service = get_email_notification_service()
+                email_sent = email_service.send_leave_request_confirmation(
+                    to_email=account.primary_email or email,
+                    employee_name=account.name,
+                    leave_dates=submitted_dates,
+                    leave_type=resolved_leave_type,
+                    reason=reason,
+                    leave_request_no=leave_request_no,
+                    direct_supervisor=direct_supervisor_name,
+                    sales_dept_manager=sales_dept_manager_name,
+                )
+                if email_sent:
+                    logger.info(f"Confirmation email sent to {account.primary_email or email}")
+                else:
+                    logger.warning(f"Failed to send confirmation email to {account.primary_email or email}")
+            except Exception as email_error:
+                # Don't fail the submission if email fails
+                logger.error(f"Error sending confirmation email: {email_error}")
+            
             return {
                 "success": True,
-                "message": "Leave request submitted successfully",
-                "ragic_id": ragic_id,
-                "employee": employee.name,
-                "date": leave_date,
-                "supervisor": employee.supervisor_email,
-                "dept_manager": dept_manager_email,
+                "message": f"請假申請已成功送出（共 {len(submitted_dates)} 天，請假單號：{leave_request_no}）",
+                "ragic_ids": ragic_ids,
+                "employee": account.name,
+                "dates": submitted_dates,
+                "total_days": len(submitted_dates),
+                "direct_supervisor": direct_supervisor_name,
+                "sales_dept_manager": sales_dept_manager_name,
             }
 
         except httpx.HTTPError as e:
             logger.error(f"Ragic API error: {e}")
-            raise SubmissionError(
-                f"Failed to submit leave request: {e}") from e
+            raise SubmissionError(f"提交請假申請失敗: {e}") from e
         except Exception as e:
             logger.error(f"Unexpected error submitting leave: {e}")
-            raise SubmissionError(f"Leave submission failed: {e}") from e
+            raise SubmissionError(f"請假申請提交失敗: {e}") from e
 
 
 # Singleton

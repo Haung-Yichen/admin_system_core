@@ -17,6 +17,7 @@ from core.interface import IAppModule
 from modules.administrative.core.config import get_admin_settings
 from modules.administrative.routers import leave_router, liff_router
 from modules.administrative.services.ragic_sync import RagicSyncService
+from modules.administrative.services.rich_menu import RichMenuService
 
 if TYPE_CHECKING:
     from core.app_context import AppContext
@@ -48,8 +49,8 @@ class AdministrativeModule(IAppModule):
         self._sync_service: Optional[RagicSyncService] = None
         self._sync_status: dict[str, Any] = {
             "status": "pending",
-            "employees": 0,
-            "departments": 0,
+            "accounts": 0,
+            "skipped": 0,
             "last_error": None,
         }
         self._settings = get_admin_settings()
@@ -80,6 +81,9 @@ class AdministrativeModule(IAppModule):
 
         # Trigger async data sync in background
         self._start_ragic_sync()
+        
+        # Setup and activate LINE Rich Menu in background
+        self._start_rich_menu_setup()
 
         context.log_event(
             "Administrative module loaded with Leave Request System",
@@ -107,15 +111,15 @@ class AdministrativeModule(IAppModule):
                 )
 
                 self._sync_status["status"] = "completed"
-                self._sync_status["employees"] = result.get(
-                    "employees_synced", 0)
-                self._sync_status["departments"] = result.get(
-                    "departments_synced", 0)
+                self._sync_status["accounts"] = result.get(
+                    "accounts_synced", 0)
+                self._sync_status["skipped"] = result.get(
+                    "accounts_skipped", 0)
 
                 logger.info(
                     f"Ragic sync completed: "
-                    f"{self._sync_status['employees']} employees, "
-                    f"{self._sync_status['departments']} departments"
+                    f"{self._sync_status['accounts']} accounts synced, "
+                    f"{self._sync_status['skipped']} skipped"
                 )
 
             except Exception as e:
@@ -161,6 +165,66 @@ class AdministrativeModule(IAppModule):
         sync_thread = threading.Thread(target=sync_worker, daemon=True)
         sync_thread.start()
         logger.info("Ragic sync started in background")
+
+    def _start_rich_menu_setup(self) -> None:
+        """
+        在背景執行緒中設定並啟用 LINE Rich Menu。
+        
+        流程：
+            1. 刪除所有現有選單
+            2. 建立新選單
+            3. 上傳選單圖片
+            4. 設為預設選單
+        """
+        def setup_worker():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            rich_menu_service = RichMenuService()
+            
+            try:
+                logger.info("Starting Rich Menu setup...")
+                success = loop.run_until_complete(
+                    rich_menu_service.setup_and_activate_menu()
+                )
+                
+                if success:
+                    logger.info("Rich Menu setup completed successfully")
+                else:
+                    logger.warning("Rich Menu setup failed")
+                    
+            except Exception as e:
+                logger.error(f"Rich Menu setup error: {e}")
+                
+            finally:
+                # Close HTTP client
+                try:
+                    loop.run_until_complete(rich_menu_service.close())
+                except Exception as e:
+                    logger.warning(f"Error closing rich menu service: {e}")
+                
+                # Windows-specific cleanup
+                try:
+                    pending = asyncio.all_tasks(loop)
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        loop.run_until_complete(asyncio.gather(
+                            *pending, return_exceptions=True))
+                except Exception:
+                    pass
+                
+                try:
+                    loop.run_until_complete(asyncio.sleep(0.250))
+                except Exception:
+                    pass
+                
+                loop.close()
+        
+        # Run in background thread
+        menu_thread = threading.Thread(target=setup_worker, daemon=True)
+        menu_thread.start()
+        logger.info("Rich Menu setup started in background")
 
     def handle_event(self, context: "AppContext", event: dict) -> Optional[dict]:
         """
@@ -361,10 +425,10 @@ class AdministrativeModule(IAppModule):
             status = "warning"
 
         details["Sync Status"] = sync_status.title()
-        details["Cached Employees"] = str(
-            self._sync_status.get("employees", 0))
-        details["Cached Departments"] = str(
-            self._sync_status.get("departments", 0))
+        details["Cached Accounts"] = str(
+            self._sync_status.get("accounts", 0))
+        details["Skipped"] = str(
+            self._sync_status.get("skipped", 0))
 
         if self._sync_status.get("last_error"):
             details["Last Error"] = self._sync_status["last_error"][:100]

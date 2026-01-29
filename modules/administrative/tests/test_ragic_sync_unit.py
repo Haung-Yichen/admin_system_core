@@ -1,15 +1,25 @@
 """
 Unit Tests for Ragic Sync Service.
 
-Tests synchronization of Ragic data to local PostgreSQL cache.
+Tests synchronization of Ragic Account data to local PostgreSQL cache.
 """
 
 import pytest
+from datetime import date
 from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 from pydantic import SecretStr
 
-from modules.administrative.services.ragic_sync import RagicSyncService
+from modules.administrative.services.ragic_sync import (
+    RagicSyncService,
+    AccountRecordSchema,
+    parse_date,
+    parse_bool,
+    parse_float,
+    parse_int,
+    parse_string,
+    transform_ragic_record,
+)
 from modules.administrative.core.config import AdminSettings
 
 
@@ -18,14 +28,7 @@ def mock_settings():
     """Create mock AdminSettings."""
     settings = MagicMock(spec=AdminSettings)
     settings.ragic_api_key = SecretStr("test_api_key")
-    settings.ragic_url_employee = "https://ragic.example.com/employee"
-    settings.ragic_url_dept = "https://ragic.example.com/department"
-    settings.field_employee_email = "1000001"
-    settings.field_employee_name = "1000002"
-    settings.field_employee_department = "1000003"
-    settings.field_employee_supervisor_email = "1000004"
-    settings.field_department_name = "1000001"
-    settings.field_department_manager_email = "1000002"
+    settings.ragic_url_account = "https://ragic.example.com/account"
     settings.sync_timeout_seconds = 30
     settings.sync_batch_size = 100
     return settings
@@ -35,6 +38,151 @@ def mock_settings():
 def ragic_service(mock_settings):
     """Create RagicSyncService with mock settings."""
     return RagicSyncService(settings=mock_settings)
+
+
+class TestParsingHelpers:
+    """Tests for data parsing helper functions."""
+
+    def test_parse_date_valid(self):
+        """Test parsing valid date string."""
+        result = parse_date("2024-03-15")
+        assert result == date(2024, 3, 15)
+
+    def test_parse_date_empty(self):
+        """Test parsing empty string returns None."""
+        assert parse_date("") is None
+        assert parse_date(None) is None
+
+    def test_parse_date_invalid(self):
+        """Test parsing invalid date returns None."""
+        assert parse_date("invalid-date") is None
+        assert parse_date("15/03/2024") is None
+
+    def test_parse_bool_values(self):
+        """Test parsing boolean values."""
+        assert parse_bool("1") is True
+        assert parse_bool("0") is False
+        assert parse_bool(1) is True
+        assert parse_bool(0) is False
+        assert parse_bool("true") is True
+        assert parse_bool("是") is True
+        assert parse_bool("") is None
+        assert parse_bool(None) is None
+
+    def test_parse_float_values(self):
+        """Test parsing float values."""
+        assert parse_float("0.85") == 0.85
+        assert parse_float("100") == 100.0
+        assert parse_float(0.5) == 0.5
+        assert parse_float("1,234.56") == 1234.56
+        assert parse_float("") is None
+        assert parse_float(None) is None
+
+    def test_parse_int_values(self):
+        """Test parsing integer values."""
+        assert parse_int("123") == 123
+        assert parse_int(456) == 456
+        assert parse_int("1,000") == 1000
+        assert parse_int("") is None
+        assert parse_int(None) is None
+
+    def test_parse_string_values(self):
+        """Test parsing string values."""
+        assert parse_string("  test  ") == "test"
+        assert parse_string("") is None
+        assert parse_string(None) is None
+        assert parse_string(123) == "123"
+
+
+class TestTransformRagicRecord:
+    """Tests for transform_ragic_record function."""
+
+    def test_transform_basic_fields(self):
+        """Test transforming basic fields from Ragic record."""
+        record = {
+            "_ragicId": 123,
+            "1005971": "123",  # ragic_id
+            "1005972": "A001",  # account_id
+            "1005975": "Test User",  # name
+            "1005974": "1",  # status
+        }
+        
+        result = transform_ragic_record(record)
+        
+        assert result["ragic_id"] == 123
+        assert result["account_id"] == "A001"
+        assert result["name"] == "Test User"
+        assert result["status"] is True
+
+    def test_transform_date_fields(self):
+        """Test transforming date fields."""
+        record = {
+            "_ragicId": 1,
+            "1005972": "A001",
+            "1005975": "Test",
+            "1005974": "1",
+            "1006016": "2024-01-15",  # approval_date
+            "1006017": "2024-02-01",  # effective_date
+        }
+        
+        result = transform_ragic_record(record)
+        
+        assert result["approval_date"] == date(2024, 1, 15)
+        assert result["effective_date"] == date(2024, 2, 1)
+
+    def test_transform_float_fields(self):
+        """Test transforming float fields."""
+        record = {
+            "_ragicId": 1,
+            "1005972": "A001",
+            "1005975": "Test",
+            "1005974": "1",
+            "1005982": "0.85",  # assessment_rate
+            "1006025": "0.01",  # court_withholding_rate
+        }
+        
+        result = transform_ragic_record(record)
+        
+        assert result["assessment_rate"] == 0.85
+        assert result["court_withholding_rate"] == 0.01
+
+
+class TestAccountRecordSchema:
+    """Tests for AccountRecordSchema Pydantic model."""
+
+    def test_schema_validates_required_fields(self):
+        """Test schema validates required fields."""
+        data = {
+            "ragic_id": 123,
+            "account_id": "A001",
+            "name": "Test User",
+            "status": True,
+        }
+        
+        schema = AccountRecordSchema(**data)
+        
+        assert schema.ragic_id == 123
+        assert schema.account_id == "A001"
+
+    def test_schema_with_all_fields(self):
+        """Test schema with all optional fields."""
+        data = {
+            "ragic_id": 123,
+            "account_id": "A001",
+            "name": "Test User",
+            "status": True,
+            "emails": "test@example.com",
+            "org_code": "ORG001",
+            "org_name": "Engineering",
+            "approval_date": date(2024, 1, 1),
+            "assessment_rate": 0.85,
+        }
+        
+        schema = AccountRecordSchema(**data)
+        
+        assert schema.emails == "test@example.com"
+        assert schema.org_code == "ORG001"
+        assert schema.assessment_rate == 0.85
 
 
 class TestRagicSyncServiceInit:
@@ -74,8 +222,9 @@ class TestFetchFormSchema:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "fields": {
-                "1000001": {"name": "Email"},
-                "1000002": {"name": "Name"},
+                "1005971": {"name": "帳號系統編號"},
+                "1005972": {"name": "帳號"},
+                "1005975": {"name": "姓名"},
             }
         }
         mock_response.raise_for_status = MagicMock()
@@ -87,7 +236,7 @@ class TestFetchFormSchema:
         result = await ragic_service._fetch_form_schema("https://test.com/form")
 
         assert "fields" in result
-        assert "1000001" in result["fields"]
+        assert "1005971" in result["fields"]
 
     @pytest.mark.asyncio
     async def test_fetch_schema_http_error(self, ragic_service):
@@ -106,53 +255,39 @@ class TestValidateFieldMappings:
 
     @pytest.mark.asyncio
     async def test_validate_all_fields_exist(self, ragic_service):
-        """Test validation passes when all fields exist."""
-        employee_schema = {
+        """Test validation passes when all critical fields exist."""
+        schema = {
             "fields": {
-                "1000001": {"name": "Email"},
-                "1000002": {"name": "Name"},
-                "1000003": {"name": "Department"},
-                "1000004": {"name": "Supervisor"},
-            }
-        }
-        dept_schema = {
-            "fields": {
-                "1000001": {"name": "Name"},
-                "1000002": {"name": "Manager"},
+                "1005971": {"name": "帳號系統編號"},
+                "1005972": {"name": "帳號"},
+                "1005975": {"name": "姓名"},
+                "1005974": {"name": "狀態"},
             }
         }
 
         with patch.object(ragic_service, '_fetch_form_schema', new_callable=AsyncMock) as mock_fetch:
-            mock_fetch.side_effect = [employee_schema, dept_schema]
+            mock_fetch.return_value = schema
 
             issues = await ragic_service._validate_field_mappings()
 
-            assert issues["employee"] == []
-            assert issues["department"] == []
+            assert issues == []
 
     @pytest.mark.asyncio
-    async def test_validate_missing_employee_field(self, ragic_service):
-        """Test validation detects missing employee field."""
-        employee_schema = {
+    async def test_validate_missing_critical_field(self, ragic_service):
+        """Test validation detects missing critical field."""
+        schema = {
             "fields": {
-                "1000001": {"name": "Email"},
-                # Missing 1000002, 1000003, 1000004
-            }
-        }
-        dept_schema = {
-            "fields": {
-                "1000001": {"name": "Name"},
-                "1000002": {"name": "Manager"},
+                "1005971": {"name": "帳號系統編號"},
+                # Missing 1005972, 1005975, 1005974
             }
         }
 
         with patch.object(ragic_service, '_fetch_form_schema', new_callable=AsyncMock) as mock_fetch:
-            mock_fetch.side_effect = [employee_schema, dept_schema]
+            mock_fetch.return_value = schema
 
             issues = await ragic_service._validate_field_mappings()
 
-            assert len(issues["employee"]) == 3  # 3 missing fields
-            assert issues["department"] == []
+            assert len(issues) == 3
 
 
 class TestFetchFormData:
@@ -164,8 +299,8 @@ class TestFetchFormData:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "1": {"1000001": "test@example.com", "1000002": "Test User"},
-            "2": {"1000001": "user2@example.com", "1000002": "User Two"},
+            "1": {"1005972": "A001", "1005975": "User One"},
+            "2": {"1005972": "A002", "1005975": "User Two"},
             "_metaData": {"total": 2},  # Should be skipped
         }
         mock_response.raise_for_status = MagicMock()
@@ -197,146 +332,67 @@ class TestFetchFormData:
         assert records == []
 
 
-class TestUpsertEmployees:
-    """Tests for _upsert_employees method."""
+class TestUpsertAccounts:
+    """Tests for _upsert_accounts method."""
 
     @pytest.mark.asyncio
-    async def test_upsert_employees_with_email(self, ragic_service):
-        """Test upserting employees with valid emails."""
+    async def test_upsert_accounts_success(self, ragic_service):
+        """Test upserting accounts with valid data."""
         mock_session = AsyncMock()
 
         records = [
             {
                 "_ragicId": 1,
-                "1000001": "emp1@example.com",
-                "1000002": "Employee One",
-                "1000003": "Engineering",
-                "1000004": "manager@example.com",
+                "1005971": "1",
+                "1005972": "A001",
+                "1005975": "User One",
+                "1005974": "1",
             },
             {
                 "_ragicId": 2,
-                "1000001": "emp2@example.com",
-                "1000002": "Employee Two",
-                "1000003": "HR",
-                "1000004": "hr_mgr@example.com",
+                "1005971": "2",
+                "1005972": "A002",
+                "1005975": "User Two",
+                "1005974": "1",
             },
         ]
 
-        with patch.object(ragic_service, '_build_name_to_email_map', new_callable=AsyncMock) as mock_map:
-            mock_map.return_value = {}
+        synced, skipped = await ragic_service._upsert_accounts(records, mock_session)
 
-            count = await ragic_service._upsert_employees(records, mock_session)
-
-            assert count == 2
-            mock_session.execute.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_upsert_employees_empty(self, ragic_service):
-        """Test upserting empty list returns 0."""
-        mock_session = AsyncMock()
-
-        count = await ragic_service._upsert_employees([], mock_session)
-
-        assert count == 0
-        mock_session.execute.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_upsert_employees_email_recovery(self, ragic_service):
-        """Test email recovery from User table."""
-        mock_session = AsyncMock()
-
-        records = [
-            {
-                "_ragicId": 1,
-                "1000001": "",  # Missing email
-                "1000002": "Employee One",
-                "1000003": "Engineering",
-                "1000004": "manager@example.com",
-            },
-        ]
-
-        with patch.object(ragic_service, '_build_name_to_email_map', new_callable=AsyncMock) as mock_map:
-            # Simulate finding email by name in User table
-            mock_map.return_value = {"Employee One": "emp1@example.com"}
-
-            count = await ragic_service._upsert_employees(records, mock_session)
-
-            assert count == 1  # Should recover and upsert
-
-    @pytest.mark.asyncio
-    async def test_upsert_employees_skip_no_email(self, ragic_service):
-        """Test skipping records without email and no fallback."""
-        mock_session = AsyncMock()
-
-        records = [
-            {
-                "_ragicId": 1,
-                "1000001": "",  # Missing email
-                "1000002": "Unknown Employee",
-                "1000003": "Engineering",
-                "1000004": "",
-            },
-        ]
-
-        with patch.object(ragic_service, '_build_name_to_email_map', new_callable=AsyncMock) as mock_map:
-            mock_map.return_value = {}  # No fallback available
-
-            count = await ragic_service._upsert_employees(records, mock_session)
-
-            assert count == 0  # Should skip, not upsert
-
-
-class TestUpsertDepartments:
-    """Tests for _upsert_departments method."""
-
-    @pytest.mark.asyncio
-    async def test_upsert_departments_success(self, ragic_service):
-        """Test successful department upsert."""
-        mock_session = AsyncMock()
-
-        records = [
-            {
-                "_ragicId": 1,
-                "1000001": "Engineering",
-                "1000002": "eng_mgr@example.com",
-            },
-            {
-                "_ragicId": 2,
-                "1000001": "HR",
-                "1000002": "hr_mgr@example.com",
-            },
-        ]
-
-        count = await ragic_service._upsert_departments(records, mock_session)
-
-        assert count == 2
+        assert synced == 2
+        assert skipped == 0
         mock_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_upsert_departments_empty(self, ragic_service):
+    async def test_upsert_accounts_empty(self, ragic_service):
         """Test upserting empty list returns 0."""
         mock_session = AsyncMock()
 
-        count = await ragic_service._upsert_departments([], mock_session)
+        synced, skipped = await ragic_service._upsert_accounts([], mock_session)
 
-        assert count == 0
+        assert synced == 0
+        assert skipped == 0
+        mock_session.execute.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_upsert_departments_skip_no_name(self, ragic_service):
-        """Test skipping records without name."""
+    async def test_upsert_accounts_skip_no_account_id(self, ragic_service):
+        """Test skipping records without account_id."""
         mock_session = AsyncMock()
 
         records = [
             {
                 "_ragicId": 1,
-                "1000001": "",  # Missing name
-                "1000002": "mgr@example.com",
+                "1005971": "1",
+                "1005972": "",  # Missing account_id
+                "1005975": "Unknown User",
+                "1005974": "1",
             },
         ]
 
-        count = await ragic_service._upsert_departments(records, mock_session)
+        synced, skipped = await ragic_service._upsert_accounts(records, mock_session)
 
-        assert count == 0
+        assert synced == 0
+        assert skipped == 1
 
 
 class TestSyncAllData:
@@ -348,18 +404,13 @@ class TestSyncAllData:
         with patch.object(ragic_service, '_validate_field_mappings', new_callable=AsyncMock) as mock_validate, \
                 patch.object(ragic_service, '_ensure_tables_exist', new_callable=AsyncMock) as mock_ensure, \
                 patch.object(ragic_service, '_fetch_form_data', new_callable=AsyncMock) as mock_fetch, \
-                patch.object(ragic_service, '_upsert_employees', new_callable=AsyncMock) as mock_emp, \
-                patch.object(ragic_service, '_upsert_departments', new_callable=AsyncMock) as mock_dept, \
+                patch.object(ragic_service, '_upsert_accounts', new_callable=AsyncMock) as mock_upsert, \
                 patch.object(ragic_service, 'close', new_callable=AsyncMock) as mock_close, \
                 patch('modules.administrative.services.ragic_sync.get_thread_local_session') as mock_session:
 
-            mock_validate.return_value = {"employee": [], "department": []}
-            mock_fetch.side_effect = [
-                [{"_ragicId": 1}],  # Employee records
-                [{"_ragicId": 1}],  # Department records
-            ]
-            mock_emp.return_value = 10
-            mock_dept.return_value = 5
+            mock_validate.return_value = []
+            mock_fetch.return_value = [{"_ragicId": 1}]
+            mock_upsert.return_value = (10, 2)
 
             # Setup async context manager for session
             mock_session_instance = AsyncMock()
@@ -367,10 +418,9 @@ class TestSyncAllData:
 
             result = await ragic_service.sync_all_data()
 
-            assert result["employees_synced"] == 10
-            assert result["departments_synced"] == 5
-            assert result["schema_issues"] == {
-                "employee": [], "department": []}
+            assert result["accounts_synced"] == 10
+            assert result["accounts_skipped"] == 2
+            assert result["schema_issues"] == []
             mock_close.assert_called_once()
 
     @pytest.mark.asyncio
@@ -379,18 +429,13 @@ class TestSyncAllData:
         with patch.object(ragic_service, '_validate_field_mappings', new_callable=AsyncMock) as mock_validate, \
                 patch.object(ragic_service, '_ensure_tables_exist', new_callable=AsyncMock), \
                 patch.object(ragic_service, '_fetch_form_data', new_callable=AsyncMock) as mock_fetch, \
-                patch.object(ragic_service, '_upsert_employees', new_callable=AsyncMock) as mock_emp, \
-                patch.object(ragic_service, '_upsert_departments', new_callable=AsyncMock) as mock_dept, \
+                patch.object(ragic_service, '_upsert_accounts', new_callable=AsyncMock) as mock_upsert, \
                 patch.object(ragic_service, 'close', new_callable=AsyncMock), \
                 patch('modules.administrative.services.ragic_sync.get_thread_local_session') as mock_session:
 
-            mock_validate.return_value = {
-                "employee": ["1000005"],  # Missing field
-                "department": [],
-            }
-            mock_fetch.side_effect = [[], []]
-            mock_emp.return_value = 0
-            mock_dept.return_value = 0
+            mock_validate.return_value = ["1005974"]  # Missing field
+            mock_fetch.return_value = []
+            mock_upsert.return_value = (0, 0)
 
             mock_session_instance = AsyncMock()
             mock_session.return_value.__aenter__.return_value = mock_session_instance
@@ -398,7 +443,7 @@ class TestSyncAllData:
             result = await ragic_service.sync_all_data()
 
             # Should still complete despite schema issues
-            assert result["schema_issues"]["employee"] == ["1000005"]
+            assert result["schema_issues"] == ["1005974"]
 
 
 class TestClose:

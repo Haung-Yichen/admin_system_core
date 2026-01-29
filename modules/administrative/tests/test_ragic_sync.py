@@ -1,10 +1,10 @@
 """
-Integration Test: Ragic Employee Sync.
+Integration Test: Ragic Account Sync.
 
 Tests the full sync workflow:
-1. Fetches data from Ragic ADMIN_RAGIC_URL_EMPLOYEE
-2. Creates/updates records in the local administrative_employees table
-3. Verifies record count matches expected (238 records)
+1. Fetches data from Ragic ADMIN_RAGIC_URL_ACCOUNT
+2. Creates/updates records in the local administrative_accounts table
+3. Verifies record count and data integrity
 
 Usage:
     python -m modules.administrative.tests.test_ragic_sync
@@ -26,17 +26,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def test_employee_sync():
-    """Test employee sync from Ragic to local DB."""
+async def test_account_sync():
+    """Test account sync from Ragic to local DB."""
     from sqlalchemy import select, func
     
     from core.database import get_standalone_session
     from modules.administrative.services.ragic_sync import RagicSyncService
-    from modules.administrative.models import AdministrativeEmployee
+    from modules.administrative.models import AdministrativeAccount
     from modules.administrative.core.config import get_admin_settings
 
     print("=" * 70)
-    print("Integration Test: Ragic Employee Sync")
+    print("Integration Test: Ragic Account Sync")
     print("=" * 70)
     print()
 
@@ -44,12 +44,7 @@ async def test_employee_sync():
     
     # Display config
     print("📋 Configuration:")
-    print(f"   Ragic Employee URL: {settings.ragic_url_employee}")
-    print(f"   Field mappings:")
-    print(f"     - Email:      {settings.field_employee_email}")
-    print(f"     - Name:       {settings.field_employee_name}")
-    print(f"     - Department: {settings.field_employee_department}")
-    print(f"     - Supervisor: {settings.field_employee_supervisor_email}")
+    print(f"   Ragic Account URL: {settings.ragic_url_account}")
     print()
 
     # Initialize service
@@ -62,7 +57,7 @@ async def test_employee_sync():
         print("🔌 Step 1: Testing Ragic API connection...")
         
         try:
-            schema = await sync_service._fetch_form_schema(settings.ragic_url_employee)
+            schema = await sync_service._fetch_form_schema(settings.ragic_url_account)
             fields = schema.get("fields", {})
             print(f"   ✅ Connected successfully! Found {len(fields)} fields.")
             
@@ -75,23 +70,23 @@ async def test_employee_sync():
         print()
 
         # =====================================================================
-        # Step 2: Fetch All Employee Records
+        # Step 2: Fetch All Account Records
         # =====================================================================
-        print("📥 Step 2: Fetching employee records from Ragic...")
+        print("📥 Step 2: Fetching account records from Ragic...")
         
         try:
-            records = await sync_service._fetch_form_data(settings.ragic_url_employee)
+            records = await sync_service._fetch_form_data(settings.ragic_url_account)
             print(f"   ✅ Fetched {len(records)} records from Ragic.")
             
             # Show sample record
             if records:
                 sample = records[0]
-                email_field = settings.field_employee_email
-                name_field = settings.field_employee_name
                 print(f"   Sample record:")
                 print(f"     - Ragic ID: {sample.get('_ragicId')}")
-                print(f"     - Email: {sample.get(email_field, 'N/A')}")
-                print(f"     - Name: {sample.get(name_field, 'N/A')}")
+                print(f"     - Account ID (1005972): {sample.get('1005972', 'N/A')}")
+                print(f"     - Name (1005975): {sample.get('1005975', 'N/A')}")
+                print(f"     - Status (1005974): {sample.get('1005974', 'N/A')}")
+                print(f"     - Org Code (1005978): {sample.get('1005978', 'N/A')}")
         except Exception as e:
             print(f"   ❌ Failed to fetch: {e}")
             return False
@@ -104,7 +99,7 @@ async def test_employee_sync():
         
         try:
             await sync_service._ensure_tables_exist()
-            print("   ✅ Table 'administrative_employees' is ready.")
+            print("   ✅ Table 'administrative_accounts' is ready.")
         except Exception as e:
             print(f"   ❌ Failed to create table: {e}")
             return False
@@ -119,18 +114,18 @@ async def test_employee_sync():
             async with get_standalone_session() as session:
                 # Get count before
                 before_count = await session.execute(
-                    select(func.count()).select_from(AdministrativeEmployee)
+                    select(func.count()).select_from(AdministrativeAccount)
                 )
                 before_count = before_count.scalar()
                 print(f"   Records before sync: {before_count}")
                 
                 # Perform upsert
-                upserted = await sync_service._upsert_employees(records, session)
-                print(f"   ✅ Upserted {upserted} records.")
+                synced, skipped = await sync_service._upsert_accounts(records, session)
+                print(f"   ✅ Synced {synced} records, skipped {skipped}.")
                 
                 # Get count after
                 after_count = await session.execute(
-                    select(func.count()).select_from(AdministrativeEmployee)
+                    select(func.count()).select_from(AdministrativeAccount)
                 )
                 after_count = after_count.scalar()
                 print(f"   Records after sync: {after_count}")
@@ -150,27 +145,30 @@ async def test_employee_sync():
         async with get_standalone_session() as session:
             # Check total count
             total = await session.execute(
-                select(func.count()).select_from(AdministrativeEmployee)
+                select(func.count()).select_from(AdministrativeAccount)
             )
             total = total.scalar()
             
+            # Count active accounts
+            active_count = await session.execute(
+                select(func.count()).select_from(AdministrativeAccount).where(
+                    AdministrativeAccount.status == True
+                )
+            )
+            active_count = active_count.scalar()
+            
             # Check sample records
             samples = await session.execute(
-                select(AdministrativeEmployee).limit(5)
+                select(AdministrativeAccount).limit(5)
             )
             samples = samples.scalars().all()
             
-            print(f"   Total employees in DB: {total}")
+            print(f"   Total accounts in DB: {total}")
+            print(f"   Active accounts: {active_count}")
             print(f"   Sample records:")
-            for emp in samples:
-                print(f"     - {emp.name} ({emp.email}) - Dept: {emp.department_name}")
-            
-            # Validate expected count
-            expected_count = 238
-            if total == expected_count:
-                print(f"   ✅ Count matches expected: {expected_count}")
-            else:
-                print(f"   ⚠️ Count mismatch: got {total}, expected {expected_count}")
+            for acc in samples:
+                status = "Active" if acc.status else "Disabled"
+                print(f"     - {acc.name} ({acc.account_id}) - Org: {acc.org_name} [{status}]")
         
         print()
         print("=" * 70)
@@ -191,5 +189,5 @@ async def test_employee_sync():
 
 
 if __name__ == "__main__":
-    success = asyncio.run(test_employee_sync())
+    success = asyncio.run(test_account_sync())
     sys.exit(0 if success else 1)

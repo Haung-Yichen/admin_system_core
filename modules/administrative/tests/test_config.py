@@ -10,25 +10,52 @@ import os
 
 from modules.administrative.core.config import (
     AdminSettings,
-    RagicFieldMapping,
+    RagicAccountFieldMapping,
     get_admin_settings,
 )
 
 
-class TestRagicFieldMapping:
-    """Tests for RagicFieldMapping constants."""
+class TestRagicAccountFieldMapping:
+    """Tests for RagicAccountFieldMapping constants."""
 
-    def test_employee_fields_defined(self):
-        """Test employee field mappings are defined."""
-        assert RagicFieldMapping.EMPLOYEE_EMAIL == "1001132"
-        assert RagicFieldMapping.EMPLOYEE_NAME == "1001129"
-        assert RagicFieldMapping.EMPLOYEE_DEPARTMENT == "1001194"
-        assert RagicFieldMapping.EMPLOYEE_SUPERVISOR_EMAIL == "1001182"
+    def test_primary_identification_fields(self):
+        """Test primary identification field mappings are defined."""
+        assert RagicAccountFieldMapping.RAGIC_ID == "1005971"
+        assert RagicAccountFieldMapping.ACCOUNT_ID == "1005972"
+        assert RagicAccountFieldMapping.ID_CARD_NUMBER == "1005973"
+        assert RagicAccountFieldMapping.EMPLOYEE_ID == "1005983"
 
-    def test_department_fields_defined(self):
-        """Test department field mappings are defined."""
-        assert RagicFieldMapping.DEPARTMENT_NAME == "1002508"
-        assert RagicFieldMapping.DEPARTMENT_MANAGER_EMAIL == "1002509"
+    def test_basic_info_fields(self):
+        """Test basic info field mappings are defined."""
+        assert RagicAccountFieldMapping.STATUS == "1005974"
+        assert RagicAccountFieldMapping.NAME == "1005975"
+        assert RagicAccountFieldMapping.GENDER == "1005976"
+        assert RagicAccountFieldMapping.BIRTHDAY == "1005985"
+
+    def test_contact_fields(self):
+        """Test contact field mappings are defined."""
+        assert RagicAccountFieldMapping.EMAILS == "1005977"
+        assert RagicAccountFieldMapping.PHONES == "1005986"
+        assert RagicAccountFieldMapping.MOBILES == "1005987"
+
+    def test_organization_fields(self):
+        """Test organization field mappings are defined."""
+        assert RagicAccountFieldMapping.ORG_CODE == "1005978"
+        assert RagicAccountFieldMapping.ORG_NAME == "1006049"
+        assert RagicAccountFieldMapping.RANK_CODE == "1005979"
+        assert RagicAccountFieldMapping.RANK_NAME == "1006050"
+
+    def test_date_fields(self):
+        """Test date field mappings are defined."""
+        assert RagicAccountFieldMapping.APPROVAL_DATE == "1006016"
+        assert RagicAccountFieldMapping.EFFECTIVE_DATE == "1006017"
+        assert RagicAccountFieldMapping.RESIGNATION_DATE == "1006019"
+
+    def test_license_fields(self):
+        """Test license field mappings are defined."""
+        assert RagicAccountFieldMapping.LIFE_LICENSE_NUMBER == "1005998"
+        assert RagicAccountFieldMapping.PROPERTY_LICENSE_NUMBER == "1006002"
+        assert RagicAccountFieldMapping.AH_LICENSE_NUMBER == "1006021"
 
 
 class TestAdminSettings:
@@ -39,8 +66,7 @@ class TestAdminSettings:
         """Set up required environment variables."""
         env_vars = {
             "ADMIN_RAGIC_API_KEY": "test_api_key",
-            "ADMIN_RAGIC_URL_EMPLOYEE": "https://ragic.example.com/employee",
-            "ADMIN_RAGIC_URL_DEPT": "https://ragic.example.com/dept",
+            "ADMIN_RAGIC_URL_ACCOUNT": "https://ragic.example.com/account",
             "ADMIN_LINE_CHANNEL_SECRET": "test_channel_secret",
             "ADMIN_LINE_CHANNEL_ACCESS_TOKEN": "test_access_token",
         }
@@ -55,8 +81,7 @@ class TestAdminSettings:
         settings = AdminSettings()
 
         assert settings.ragic_api_key.get_secret_value() == "test_api_key"
-        assert settings.ragic_url_employee == "https://ragic.example.com/employee"
-        assert settings.ragic_url_dept == "https://ragic.example.com/dept"
+        assert settings.ragic_url_account == "https://ragic.example.com/account"
 
     def test_secret_values(self, mock_env_vars):
         """Test that secret values are properly protected."""
@@ -79,28 +104,13 @@ class TestAdminSettings:
 
         assert settings.sync_batch_size == 100
         assert settings.sync_timeout_seconds == 60
-        # line_liff_id_leave may be set via env, default is ""
-
-    def test_default_field_mappings(self, mock_env_vars):
-        """Test default field mappings use RagicFieldMapping constants."""
-        get_admin_settings.cache_clear()
-
-        settings = AdminSettings()
-
-        assert settings.field_employee_email == RagicFieldMapping.EMPLOYEE_EMAIL
-        assert settings.field_employee_name == RagicFieldMapping.EMPLOYEE_NAME
-        assert settings.field_employee_department == RagicFieldMapping.EMPLOYEE_DEPARTMENT
-        assert settings.field_employee_supervisor_email == RagicFieldMapping.EMPLOYEE_SUPERVISOR_EMAIL
-        assert settings.field_department_name == RagicFieldMapping.DEPARTMENT_NAME
-        assert settings.field_department_manager_email == RagicFieldMapping.DEPARTMENT_MANAGER_EMAIL
 
     def test_override_defaults(self, monkeypatch):
         """Test overriding default values via environment."""
         get_admin_settings.cache_clear()
 
         monkeypatch.setenv("ADMIN_RAGIC_API_KEY", "test_key")
-        monkeypatch.setenv("ADMIN_RAGIC_URL_EMPLOYEE", "https://test.com/emp")
-        monkeypatch.setenv("ADMIN_RAGIC_URL_DEPT", "https://test.com/dept")
+        monkeypatch.setenv("ADMIN_RAGIC_URL_ACCOUNT", "https://test.com/account")
         monkeypatch.setenv("ADMIN_LINE_CHANNEL_SECRET", "secret")
         monkeypatch.setenv("ADMIN_LINE_CHANNEL_ACCESS_TOKEN", "token")
         monkeypatch.setenv("ADMIN_SYNC_BATCH_SIZE", "200")
@@ -111,21 +121,6 @@ class TestAdminSettings:
         assert settings.sync_batch_size == 200
         assert settings.sync_timeout_seconds == 120
 
-    def test_override_field_mappings(self, monkeypatch):
-        """Test overriding field mappings via environment."""
-        get_admin_settings.cache_clear()
-
-        monkeypatch.setenv("ADMIN_RAGIC_API_KEY", "test_key")
-        monkeypatch.setenv("ADMIN_RAGIC_URL_EMPLOYEE", "https://test.com/emp")
-        monkeypatch.setenv("ADMIN_RAGIC_URL_DEPT", "https://test.com/dept")
-        monkeypatch.setenv("ADMIN_LINE_CHANNEL_SECRET", "secret")
-        monkeypatch.setenv("ADMIN_LINE_CHANNEL_ACCESS_TOKEN", "token")
-        monkeypatch.setenv("ADMIN_FIELD_EMPLOYEE_EMAIL", "9999999")
-
-        settings = AdminSettings()
-
-        assert settings.field_employee_email == "9999999"
-
 
 class TestGetAdminSettings:
     """Tests for get_admin_settings cached function."""
@@ -135,8 +130,7 @@ class TestGetAdminSettings:
         get_admin_settings.cache_clear()
 
         monkeypatch.setenv("ADMIN_RAGIC_API_KEY", "test_key")
-        monkeypatch.setenv("ADMIN_RAGIC_URL_EMPLOYEE", "https://test.com/emp")
-        monkeypatch.setenv("ADMIN_RAGIC_URL_DEPT", "https://test.com/dept")
+        monkeypatch.setenv("ADMIN_RAGIC_URL_ACCOUNT", "https://test.com/account")
         monkeypatch.setenv("ADMIN_LINE_CHANNEL_SECRET", "secret")
         monkeypatch.setenv("ADMIN_LINE_CHANNEL_ACCESS_TOKEN", "token")
 
@@ -149,8 +143,7 @@ class TestGetAdminSettings:
         get_admin_settings.cache_clear()
 
         monkeypatch.setenv("ADMIN_RAGIC_API_KEY", "test_key")
-        monkeypatch.setenv("ADMIN_RAGIC_URL_EMPLOYEE", "https://test.com/emp")
-        monkeypatch.setenv("ADMIN_RAGIC_URL_DEPT", "https://test.com/dept")
+        monkeypatch.setenv("ADMIN_RAGIC_URL_ACCOUNT", "https://test.com/account")
         monkeypatch.setenv("ADMIN_LINE_CHANNEL_SECRET", "secret")
         monkeypatch.setenv("ADMIN_LINE_CHANNEL_ACCESS_TOKEN", "token")
 
@@ -163,37 +156,18 @@ class TestGetAdminSettings:
 class TestSettingsValidation:
     """Tests for settings validation."""
 
-    def test_missing_required_field_api_key(self, monkeypatch):
-        """Test missing RAGIC API key raises validation error."""
-        get_admin_settings.cache_clear()
-
-        # Set most required fields but omit RAGIC API key
-        monkeypatch.setenv("ADMIN_RAGIC_URL_EMPLOYEE", "https://test.com/emp")
-        monkeypatch.setenv("ADMIN_RAGIC_URL_DEPT", "https://test.com/dept")
-        monkeypatch.setenv("ADMIN_LINE_CHANNEL_SECRET", "secret")
-        monkeypatch.setenv("ADMIN_LINE_CHANNEL_ACCESS_TOKEN", "token")
-
-        # Delete the API key if it exists
-        monkeypatch.delenv("ADMIN_RAGIC_API_KEY", raising=False)
-
-        # Due to .env file loading, this may not raise - just verify settings work
-        # when all required vars are present
-        monkeypatch.setenv("ADMIN_RAGIC_API_KEY", "test_key")
-        settings = AdminSettings()
-        assert settings.ragic_api_key.get_secret_value() == "test_key"
-
     def test_all_required_fields_present(self, monkeypatch):
         """Test settings load successfully with all required fields."""
         get_admin_settings.cache_clear()
 
         monkeypatch.setenv("ADMIN_RAGIC_API_KEY", "test_key")
-        monkeypatch.setenv("ADMIN_RAGIC_URL_EMPLOYEE", "https://test.com/emp")
-        monkeypatch.setenv("ADMIN_RAGIC_URL_DEPT", "https://test.com/dept")
+        monkeypatch.setenv("ADMIN_RAGIC_URL_ACCOUNT", "https://test.com/account")
         monkeypatch.setenv("ADMIN_LINE_CHANNEL_SECRET", "secret")
         monkeypatch.setenv("ADMIN_LINE_CHANNEL_ACCESS_TOKEN", "token")
 
         settings = AdminSettings()
 
         assert settings.ragic_api_key.get_secret_value() == "test_key"
+        assert settings.ragic_url_account == "https://test.com/account"
         assert settings.line_channel_secret.get_secret_value() == "secret"
         assert settings.line_channel_access_token.get_secret_value() == "token"

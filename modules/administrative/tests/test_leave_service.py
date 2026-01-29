@@ -5,18 +5,17 @@ Tests the LeaveService class which handles leave request business logic.
 """
 
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from modules.administrative.services.leave import (
     LeaveService,
     LeaveError,
     EmployeeNotFoundError,
-    DepartmentNotFoundError,
     SubmissionError,
     get_leave_service,
 )
-from modules.administrative.models import AdministrativeEmployee, AdministrativeDepartment
+from modules.administrative.models import AdministrativeAccount
 
 
 @pytest.fixture
@@ -26,10 +25,6 @@ def mock_admin_settings():
     settings.ragic_api_key = MagicMock()
     settings.ragic_api_key.get_secret_value.return_value = "test-api-key"
     settings.sync_timeout_seconds = 30
-    settings.field_employee_email = "1001132"
-    settings.field_employee_name = "1001129"
-    settings.field_employee_supervisor_email = "1001182"
-    settings.field_department_manager_email = "1002509"
     return settings
 
 
@@ -40,25 +35,35 @@ def leave_service(mock_admin_settings):
 
 
 @pytest.fixture
-def mock_employee():
-    """Create a mock employee record."""
-    employee = MagicMock(spec=AdministrativeEmployee)
-    employee.email = "john.doe@company.com"
-    employee.name = "John Doe"
-    employee.department_name = "Engineering"
-    employee.supervisor_email = "manager@company.com"
-    employee.ragic_id = 12345
-    return employee
+def mock_account():
+    """Create a mock account record."""
+    account = MagicMock(spec=AdministrativeAccount)
+    account.ragic_id = 12345
+    account.account_id = "A001"
+    account.name = "John Doe"
+    account.status = True
+    account.emails = "john.doe@company.com"
+    account.primary_email = "john.doe@company.com"
+    account.org_code = "ORG001"
+    account.org_name = "Engineering"
+    account.mentor_id_card = "A123456789"
+    account.mentor_name = "Jane Manager"
+    account.sales_dept = "Sales North"
+    account.sales_dept_manager = "Department Head"
+    return account
 
 
 @pytest.fixture
-def mock_department():
-    """Create a mock department record."""
-    dept = MagicMock(spec=AdministrativeDepartment)
-    dept.name = "Engineering"
-    dept.manager_email = "dept_head@company.com"
-    dept.ragic_id = 100
-    return dept
+def mock_mentor_account():
+    """Create a mock mentor account record."""
+    mentor = MagicMock(spec=AdministrativeAccount)
+    mentor.ragic_id = 99999
+    mentor.account_id = "M001"
+    mentor.name = "Jane Manager"
+    mentor.emails = "manager@company.com"
+    mentor.primary_email = "manager@company.com"
+    mentor.status = True
+    return mentor
 
 
 @pytest.fixture
@@ -92,11 +97,11 @@ class TestLeaveServiceGetInitData:
     """Tests for get_init_data method."""
 
     @pytest.mark.asyncio
-    async def test_get_init_data_success(self, leave_service, mock_employee, mock_db_session):
+    async def test_get_init_data_success(self, leave_service, mock_account, mock_db_session):
         """Test successful init data retrieval."""
         # Setup mock query result
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_employee
+        mock_result.scalar_one_or_none.return_value = mock_account
         mock_db_session.execute = AsyncMock(return_value=mock_result)
 
         result = await leave_service.get_init_data("john.doe@company.com", mock_db_session)
@@ -104,13 +109,17 @@ class TestLeaveServiceGetInitData:
         assert result["name"] == "John Doe"
         assert result["department"] == "Engineering"
         assert result["email"] == "john.doe@company.com"
-        # Supervisor email should NOT be exposed
-        assert "supervisor" not in result
-        assert "supervisor_email" not in result
+        # Extended info should be included (names only, no emails)
+        assert "sales_dept" in result
+        assert "sales_dept_manager" in result
+        assert "direct_supervisor" in result
+        # Supervisor emails should NOT be exposed
+        assert "mentor_email" not in result
+        assert "sales_dept_manager_email" not in result
 
     @pytest.mark.asyncio
     async def test_get_init_data_employee_not_found(self, leave_service, mock_db_session):
-        """Test raises EmployeeNotFoundError when employee not in cache."""
+        """Test raises EmployeeNotFoundError when account not in cache."""
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
         mock_db_session.execute = AsyncMock(return_value=mock_result)
@@ -121,11 +130,11 @@ class TestLeaveServiceGetInitData:
         assert "unknown@company.com" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_get_init_data_empty_department(self, leave_service, mock_employee, mock_db_session):
-        """Test handles employee with no department."""
-        mock_employee.department_name = None
+    async def test_get_init_data_empty_org(self, leave_service, mock_account, mock_db_session):
+        """Test handles account with no organization."""
+        mock_account.org_name = None
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_employee
+        mock_result.scalar_one_or_none.return_value = mock_account
         mock_db_session.execute = AsyncMock(return_value=mock_result)
 
         result = await leave_service.get_init_data("john.doe@company.com", mock_db_session)
@@ -138,20 +147,20 @@ class TestLeaveServiceSubmitRequest:
 
     @pytest.mark.asyncio
     async def test_submit_request_success(
-        self, leave_service, mock_employee, mock_department, mock_db_session
+        self, leave_service, mock_account, mock_mentor_account, mock_db_session
     ):
         """Test successful leave request submission."""
-        # Setup employee lookup
-        mock_emp_result = MagicMock()
-        mock_emp_result.scalar_one_or_none.return_value = mock_employee
+        # Setup account lookup
+        mock_acc_result = MagicMock()
+        mock_acc_result.scalar_one_or_none.return_value = mock_account
 
-        # Setup department lookup
-        mock_dept_result = MagicMock()
-        mock_dept_result.scalar_one_or_none.return_value = mock_department
+        # Setup mentor lookup
+        mock_mentor_result = MagicMock()
+        mock_mentor_result.scalar_one_or_none.return_value = mock_mentor_account
 
         # Configure execute to return different results for different queries
         mock_db_session.execute = AsyncMock(
-            side_effect=[mock_emp_result, mock_dept_result])
+            side_effect=[mock_acc_result, mock_mentor_result])
 
         result = await leave_service.submit_leave_request(
             email="john.doe@company.com",
@@ -164,12 +173,12 @@ class TestLeaveServiceSubmitRequest:
         assert result["success"] is True
         assert result["employee"] == "John Doe"
         assert result["date"] == "2024-03-15"
-        assert result["supervisor"] == "manager@company.com"
-        assert result["dept_manager"] == "dept_head@company.com"
+        assert result["mentor"] == "manager@company.com"
+        assert result["sales_dept_manager"] == "Department Head"
 
     @pytest.mark.asyncio
     async def test_submit_request_employee_not_found(self, leave_service, mock_db_session):
-        """Test raises EmployeeNotFoundError when employee not found."""
+        """Test raises EmployeeNotFoundError when account not found."""
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
         mock_db_session.execute = AsyncMock(return_value=mock_result)
@@ -183,18 +192,18 @@ class TestLeaveServiceSubmitRequest:
             )
 
     @pytest.mark.asyncio
-    async def test_submit_request_no_department_manager(
-        self, leave_service, mock_employee, mock_db_session
+    async def test_submit_request_no_mentor(
+        self, leave_service, mock_account, mock_db_session
     ):
-        """Test handles missing department manager gracefully."""
-        mock_emp_result = MagicMock()
-        mock_emp_result.scalar_one_or_none.return_value = mock_employee
+        """Test handles missing mentor gracefully."""
+        mock_acc_result = MagicMock()
+        mock_acc_result.scalar_one_or_none.return_value = mock_account
 
-        mock_dept_result = MagicMock()
-        mock_dept_result.scalar_one_or_none.return_value = None
+        mock_mentor_result = MagicMock()
+        mock_mentor_result.scalar_one_or_none.return_value = None
 
         mock_db_session.execute = AsyncMock(
-            side_effect=[mock_emp_result, mock_dept_result])
+            side_effect=[mock_acc_result, mock_mentor_result])
 
         result = await leave_service.submit_leave_request(
             email="john.doe@company.com",
@@ -204,21 +213,22 @@ class TestLeaveServiceSubmitRequest:
         )
 
         assert result["success"] is True
-        assert result["dept_manager"] is None
+        # When mentor not found, should fallback to mentor_name
+        assert result["mentor"] == "Jane Manager"
 
     @pytest.mark.asyncio
     async def test_submit_request_with_time_range(
-        self, leave_service, mock_employee, mock_department, mock_db_session
+        self, leave_service, mock_account, mock_mentor_account, mock_db_session
     ):
         """Test submission with start and end times."""
-        mock_emp_result = MagicMock()
-        mock_emp_result.scalar_one_or_none.return_value = mock_employee
+        mock_acc_result = MagicMock()
+        mock_acc_result.scalar_one_or_none.return_value = mock_account
 
-        mock_dept_result = MagicMock()
-        mock_dept_result.scalar_one_or_none.return_value = mock_department
+        mock_mentor_result = MagicMock()
+        mock_mentor_result.scalar_one_or_none.return_value = mock_mentor_account
 
         mock_db_session.execute = AsyncMock(
-            side_effect=[mock_emp_result, mock_dept_result])
+            side_effect=[mock_acc_result, mock_mentor_result])
 
         result = await leave_service.submit_leave_request(
             email="john.doe@company.com",
@@ -259,7 +269,6 @@ class TestLeaveExceptions:
     def test_leave_error_is_base_exception(self):
         """Test LeaveError is the base exception."""
         assert issubclass(EmployeeNotFoundError, LeaveError)
-        assert issubclass(DepartmentNotFoundError, LeaveError)
         assert issubclass(SubmissionError, LeaveError)
 
     def test_exception_messages(self):
