@@ -49,30 +49,30 @@ class ChatbotSettings(BaseSettings):
         )
     ]
 
-    # Ragic - Employee Sheet (AC01)
+    # Ragic - Unified Account Table
     ragic_employee_sheet_path: Annotated[
         str,
         Field(
-            default="/HSIBAdmSys/-3/4",
-            description="Ragic sheet path for employee data (AC01)",
+            default="/HSIBAdmSys/ychn-test/11",
+            description="Ragic sheet path for unified Account table",
             validation_alias="SOP_BOT_RAGIC_EMPLOYEE_SHEET_PATH"
         )
-    ] = "/HSIBAdmSys/-3/4"
+    ] = "/HSIBAdmSys/ychn-test/11"
 
     ragic_field_email: Annotated[
         str,
-        Field(default="1000381", validation_alias="SOP_BOT_RAGIC_FIELD_EMAIL")
-    ] = "1000381"
+        Field(default="1005977", validation_alias="SOP_BOT_RAGIC_FIELD_EMAIL")
+    ] = "1005977"
 
     ragic_field_name: Annotated[
         str,
-        Field(default="1000376", validation_alias="SOP_BOT_RAGIC_FIELD_NAME")
-    ] = "1000376"
+        Field(default="1005975", validation_alias="SOP_BOT_RAGIC_FIELD_NAME")
+    ] = "1005975"
 
     ragic_field_door_access_id: Annotated[
         str,
-        Field(default="1000375", validation_alias="SOP_BOT_RAGIC_FIELD_DOOR_ACCESS_ID")
-    ] = "1000375"
+        Field(default="1005983", validation_alias="SOP_BOT_RAGIC_FIELD_DOOR_ACCESS_ID")
+    ] = "1005983"
 
     # SOP Content Validation
     sop_content_max_length: Annotated[

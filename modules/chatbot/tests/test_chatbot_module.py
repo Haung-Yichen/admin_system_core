@@ -65,11 +65,12 @@ class TestChatbotModuleImports:
 
     def test_import_routers(self):
         """Test importing routers."""
-        from modules.chatbot.routers import bot_router, sop_router
+        from modules.chatbot.routers import sop_router
         # auth_router is now in core
         from core.api import auth_router
+        # bot_router no longer exists - LINE webhook moved to framework layer
+        # Only sop_router remains in chatbot module
         assert auth_router is not None
-        assert bot_router is not None
         assert sop_router is not None
 
 
@@ -112,7 +113,8 @@ class TestSchemaValidation:
 
     def test_magic_link_request_normalizes_email(self):
         """Test email is normalized to lowercase."""
-        from core.schemas.auth import MagicLinkRequest
+        # chatbot module's MagicLinkRequest has email normalization validator
+        from modules.chatbot.schemas import MagicLinkRequest
 
         request = MagicLinkRequest(
             email="Test.User@Example.COM",

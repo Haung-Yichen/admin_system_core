@@ -5,23 +5,27 @@ Handles synchronization of data from Ragic (No-Code DB) to local cache tables.
 Follows Single Responsibility Principle - only handles fetching and storing data.
 
 Features:
-    - Schema introspection to validate field mappings
+    - Schema introspection to validate field mappings (via core.ragic)
     - Dynamic table creation if not exists
     - Full upsert sync (insert new, update existing)
     - Pydantic validation before database insertion
+
+Note:
+    This service uses the framework's core.ragic.RagicService for all
+    Ragic API communication instead of managing HTTP clients directly.
 """
 
 import logging
 from datetime import date, datetime
 from typing import Any, Optional
 
-import httpx
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from sqlalchemy import inspect, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import Base, get_thread_local_engine, get_thread_local_session
+from core.ragic import RagicService
 from modules.administrative.core.config import (
     AdminSettings,
     RagicAccountFieldMapping as Fields,
@@ -471,38 +475,34 @@ class RagicSyncService:
         await service.sync_all_data()
     """
 
-    def __init__(self, settings: AdminSettings | None = None) -> None:
+    def __init__(
+        self,
+        settings: AdminSettings | None = None,
+        ragic_service: RagicService | None = None,
+    ) -> None:
         """
         Initialize the sync service.
         
         Args:
             settings: Optional AdminSettings instance. If not provided,
                      will use get_admin_settings() to load from environment.
+            ragic_service: Optional RagicService instance. If not provided,
+                          will create one using settings.
         """
         self._settings = settings or get_admin_settings()
-        self._http_client: httpx.AsyncClient | None = None
-
-    @property
-    def _client(self) -> httpx.AsyncClient:
-        """Lazy-initialized HTTP client."""
-        if self._http_client is None:
-            self._http_client = httpx.AsyncClient(
-                timeout=httpx.Timeout(self._settings.sync_timeout_seconds),
-                headers=self._get_auth_headers(),
+        
+        # Use injected service or create one with module-specific settings
+        if ragic_service:
+            self._ragic_service = ragic_service
+        else:
+            self._ragic_service = RagicService(
+                api_key=self._settings.ragic_api_key.get_secret_value(),
+                timeout=float(self._settings.sync_timeout_seconds),
             )
-        return self._http_client
-
-    def _get_auth_headers(self) -> dict[str, str]:
-        """Get authentication headers for Ragic API."""
-        return {
-            "Authorization": f"Basic {self._settings.ragic_api_key.get_secret_value()}",
-        }
 
     async def close(self) -> None:
-        """Close the HTTP client."""
-        if self._http_client is not None:
-            await self._http_client.aclose()
-            self._http_client = None
+        """Close the Ragic service HTTP client."""
+        await self._ragic_service.close()
 
     # =========================================================================
     # Step 1: Schema Introspection & Validation
@@ -512,7 +512,7 @@ class RagicSyncService:
         """
         Fetch form schema (field definitions) from Ragic.
         
-        Ragic API: Append '?info=1' to get form schema instead of data.
+        Uses framework's RagicService.get_form_schema() method.
         
         Args:
             form_url: Full URL to the Ragic form.
@@ -520,13 +520,10 @@ class RagicSyncService:
         Returns:
             dict containing form field definitions.
         """
-        schema_url = f"{form_url}?info=1"
         try:
-            response = await self._client.get(schema_url)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPError as e:
-            logger.error(f"Failed to fetch Ragic form schema from {schema_url}: {e}")
+            return await self._ragic_service.get_form_schema(full_url=form_url)
+        except Exception as e:
+            logger.error(f"Failed to fetch Ragic form schema from {form_url}: {e}")
             raise
 
     async def _validate_field_mappings(self) -> list[str]:
@@ -624,6 +621,7 @@ class RagicSyncService:
         """
         Fetch all records from a Ragic form.
         
+        Uses framework's RagicService.get_records_by_url() method.
         Uses naming=EID parameter to get field IDs as keys instead of field names.
         This ensures field mappings work even if field names are changed in Ragic.
         
@@ -635,23 +633,15 @@ class RagicSyncService:
         """
         try:
             # Use naming=EID to get field IDs as keys (not field names)
-            response = await self._client.get(form_url, params={"naming": "EID"})
-            response.raise_for_status()
-            data = response.json()
-            
-            # Ragic returns {record_id: {fields...}, ...}
-            # Transform to list with _ragicId included
-            records = []
-            for ragic_id, record in data.items():
-                if ragic_id == "_metaData":
-                    continue  # Skip metadata
-                record["_ragicId"] = int(ragic_id)
-                records.append(record)
+            records = await self._ragic_service.get_records_by_url(
+                full_url=form_url,
+                params={"naming": "EID"},
+            )
             
             logger.info(f"Fetched {len(records)} records from {form_url}")
             return records
             
-        except httpx.HTTPError as e:
+        except Exception as e:
             logger.error(f"Failed to fetch Ragic data from {form_url}: {e}")
             raise
 

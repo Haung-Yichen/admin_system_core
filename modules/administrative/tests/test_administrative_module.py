@@ -289,7 +289,7 @@ class TestGetStatus:
     def test_status_pending(self, admin_module):
         """Test status when sync pending."""
         admin_module._sync_status = {
-            "status": "pending", "employees": 0, "departments": 0}
+            "status": "pending", "accounts": 0, "skipped": 0}
 
         status = admin_module.get_status()
 
@@ -299,7 +299,7 @@ class TestGetStatus:
     def test_status_syncing(self, admin_module):
         """Test status when sync in progress."""
         admin_module._sync_status = {
-            "status": "syncing", "employees": 0, "departments": 0}
+            "status": "syncing", "accounts": 0, "skipped": 0}
 
         status = admin_module.get_status()
 
@@ -309,22 +309,22 @@ class TestGetStatus:
         """Test status when sync completed."""
         admin_module._sync_status = {
             "status": "completed",
-            "employees": 100,
-            "departments": 10,
+            "accounts": 100,
+            "skipped": 5,
         }
 
         status = admin_module.get_status()
 
         assert status["status"] == "active"
-        assert status["details"]["Cached Employees"] == "100"
-        assert status["details"]["Cached Departments"] == "10"
+        assert status["details"]["Cached Accounts"] == "100"
+        assert status["details"]["Skipped"] == "5"
 
     def test_status_error(self, admin_module):
         """Test status when sync has error."""
         admin_module._sync_status = {
             "status": "error",
-            "employees": 0,
-            "departments": 0,
+            "accounts": 0,
+            "skipped": 0,
             "last_error": "Connection timeout",
         }
 

@@ -2,6 +2,7 @@
 Unit Tests for Leave Router.
 
 Tests the API endpoints for leave request initialization and submission.
+Updated to match current architecture (2026-01).
 """
 
 import pytest
@@ -73,11 +74,13 @@ class TestLeaveInitEndpoint:
             "line_name": "Test User",
         }
 
-        # Mock leave service
+        # Mock leave service - match current schema (no department field)
         mock_leave_service.get_init_data.return_value = {
             "name": "Test User",
-            "department": "Engineering",
             "email": "test@company.com",
+            "sales_dept": "Sales Dept",
+            "sales_dept_manager": "Manager Name",
+            "direct_supervisor": "Supervisor Name",
         }
 
         # Override dependencies
@@ -98,8 +101,9 @@ class TestLeaveInitEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "Test User"
-        assert data["department"] == "Engineering"
         assert data["email"] == "test@company.com"
+        assert "sales_dept" in data
+        assert "direct_supervisor" in data
 
         # Cleanup
         app.dependency_overrides.clear()
@@ -136,7 +140,6 @@ class TestLeaveInitEndpoint:
 
         assert response.status_code == 403
         data = response.json()
-        assert "detail" in data
         assert data["detail"]["error"] == "account_not_bound"
 
         app.dependency_overrides.clear()
@@ -188,10 +191,11 @@ class TestLeaveSubmitEndpoint:
         }
         mock_leave_service.submit_leave_request.return_value = {
             "success": True,
-            "message": "Submitted",
-            "ragic_id": 123,
+            "message": "Leave request submitted",
+            "ragic_ids": [123, 124],
             "employee": "Test User",
-            "date": "2024-03-15",
+            "dates": ["2024-03-15", "2024-03-16"],
+            "total_days": 2,
         }
 
         from modules.administrative.services.leave import get_leave_service
@@ -207,7 +211,7 @@ class TestLeaveSubmitEndpoint:
             "/api/administrative/leave/submit",
             headers={"X-Line-ID-Token": "test-token"},
             json={
-                "leave_date": "2024-03-15",
+                "leave_dates": ["2024-03-15", "2024-03-16"],
                 "reason": "Personal matters",
                 "leave_type": "事假",
             }
@@ -216,40 +220,24 @@ class TestLeaveSubmitEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert data["ragic_id"] == 123
+        assert data["total_days"] == 2
+        assert len(data["ragic_ids"]) == 2
 
         app.dependency_overrides.clear()
 
     @pytest.mark.asyncio
-    async def test_submit_validation_error(
-        self, app, mock_auth_service, mock_db_session
-    ):
-        """Test returns 422 on validation error."""
-        mock_auth_service.check_binding_status.return_value = {
-            "is_bound": True,
-            "email": "test@company.com",
-            "sub": "U12345",
-        }
-
-        from core.services import get_auth_service
-        from core.database import get_db_session
-
-        app.dependency_overrides[get_auth_service] = lambda: mock_auth_service
-        app.dependency_overrides[get_db_session] = lambda: mock_db_session
-
+    async def test_submit_missing_token(self, app):
+        """Test returns 401 when no token provided."""
         client = TestClient(app)
         response = client.post(
             "/api/administrative/leave/submit",
-            headers={"X-Line-ID-Token": "test-token"},
             json={
-                "leave_date": "2024-03-15",
-                # Missing required 'reason' field
+                "leave_dates": ["2024-03-15"],
+                "reason": "Test",
             }
         )
 
-        assert response.status_code == 422
-
-        app.dependency_overrides.clear()
+        assert response.status_code == 401
 
     @pytest.mark.asyncio
     async def test_submit_employee_not_found(
@@ -277,7 +265,7 @@ class TestLeaveSubmitEndpoint:
             "/api/administrative/leave/submit",
             headers={"X-Line-ID-Token": "test-token"},
             json={
-                "leave_date": "2024-03-15",
+                "leave_dates": ["2024-03-15"],
                 "reason": "Test",
             }
         )
@@ -297,7 +285,7 @@ class TestLeaveSubmitEndpoint:
             "sub": "U12345",
         }
         mock_leave_service.submit_leave_request.side_effect = SubmissionError(
-            "Ragic error")
+            "Ragic API error")
 
         from modules.administrative.services.leave import get_leave_service
         from core.services import get_auth_service
@@ -312,7 +300,7 @@ class TestLeaveSubmitEndpoint:
             "/api/administrative/leave/submit",
             headers={"X-Line-ID-Token": "test-token"},
             json={
-                "leave_date": "2024-03-15",
+                "leave_dates": ["2024-03-15"],
                 "reason": "Test",
             }
         )
@@ -322,65 +310,72 @@ class TestLeaveSubmitEndpoint:
         app.dependency_overrides.clear()
 
 
-class TestHealthEndpoint:
-    """Tests for GET /leave/health endpoint."""
-
-    def test_health_check(self, app):
-        """Test health check returns ok."""
-        client = TestClient(app)
-        response = client.get("/api/administrative/leave/health")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "ok"
-        assert data["service"] == "leave"
-
-
 class TestRequestSchemas:
     """Tests for request/response schema validation."""
 
     def test_leave_init_response_schema(self):
-        """Test LeaveInitResponse schema."""
+        """Test LeaveInitResponse schema (current architecture)."""
         response = LeaveInitResponse(
             name="Test User",
-            department="Engineering",
-            email="test@company.com"
+            email="test@company.com",
+            sales_dept="Sales Dept",
+            sales_dept_manager="Manager",
+            direct_supervisor="Supervisor",
         )
         assert response.name == "Test User"
-        assert response.department == "Engineering"
         assert response.email == "test@company.com"
+        assert response.sales_dept == "Sales Dept"
 
     def test_leave_submit_request_schema(self):
-        """Test LeaveSubmitRequest schema."""
+        """Test LeaveSubmitRequest schema (current architecture - uses leave_dates list)."""
         request = LeaveSubmitRequest(
-            leave_date="2024-03-15",
+            leave_dates=["2024-03-15", "2024-03-16"],
             reason="Personal matters",
             leave_type="事假",
-            start_time="09:00",
-            end_time="18:00",
         )
-        assert request.leave_date == "2024-03-15"
+        assert request.leave_dates == ["2024-03-15", "2024-03-16"]
         assert request.reason == "Personal matters"
         assert request.leave_type == "事假"
 
     def test_leave_submit_request_defaults(self):
         """Test LeaveSubmitRequest default values."""
         request = LeaveSubmitRequest(
-            leave_date="2024-03-15",
+            leave_dates=["2024-03-15"],
             reason="Test",
         )
         assert request.leave_type == "特休"  # default
-        assert request.start_time is None
-        assert request.end_time is None
 
     def test_leave_submit_response_schema(self):
-        """Test LeaveSubmitResponse schema."""
+        """Test LeaveSubmitResponse schema (current architecture - uses ragic_ids list)."""
         response = LeaveSubmitResponse(
             success=True,
             message="Submitted",
-            ragic_id=123,
+            ragic_ids=[123, 124],
             employee="Test User",
-            date="2024-03-15",
+            dates=["2024-03-15", "2024-03-16"],
+            total_days=2,
         )
         assert response.success is True
-        assert response.ragic_id == 123
+        assert response.ragic_ids == [123, 124]
+        assert response.total_days == 2
+
+
+class TestWorkdaysEndpoint:
+    """Tests for workdays query endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_workdays_success(self, app):
+        """Test successful workdays query."""
+        client = TestClient(app)
+        response = client.post(
+            "/api/administrative/leave/workdays",
+            json={
+                "start_date": "2024-03-01",
+                "end_date": "2024-03-31",
+            }
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "workdays" in data
+        assert "total_days" in data

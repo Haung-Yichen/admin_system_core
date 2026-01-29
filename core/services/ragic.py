@@ -1,54 +1,73 @@
 """
-Core Ragic Service.
+Core Ragic Service (Legacy Compatibility Layer).
 
-Handles all Ragic API communication for employee verification.
-This is a framework-level service used by all modules requiring Ragic integration.
+This module now wraps the unified core/ragic package.
+For new code, prefer using core.ragic directly:
+
+    from core.ragic import RagicService, RagicRepository, RagicModel, RagicField
+
+This file is kept for backward compatibility with existing code that imports:
+    from core.services.ragic import RagicService, get_ragic_service
+
+IMPORTANT: Employee lookup methods (verify_email_exists, get_employee_by_id)
+now use the local database cache (administrative_accounts table) instead of
+hitting the Ragic API directly. This improves performance and consistency.
+The cache is synced from Ragic on application startup by RagicSyncService.
 """
 
 import logging
 from difflib import SequenceMatcher
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from core.app_context import ConfigLoader
+from core.database.session import get_standalone_session
 from core.schemas.auth import RagicEmployeeData
+
+# Re-export from new location for compatibility
+from core.ragic.service import RagicService as BaseRagicService
+from core.ragic.service import get_ragic_service as _get_ragic_service_base
 
 logger = logging.getLogger(__name__)
 
 
 class RagicFieldConfig:
-    """Configuration for Ragic field mapping."""
+    """Configuration for Ragic field mapping (unified Account table)."""
     
     def __init__(self, config: dict[str, Any]) -> None:
         ragic_config = config.get("ragic", {})
         
-        # Field IDs from config
-        self.email_id = ragic_config.get("field_email", "1000381")
-        self.name_id = ragic_config.get("field_name", "1000376")
-        self.door_access_id = ragic_config.get("field_door_access_id", "1000375")
+        # Field IDs from config (unified Account table /HSIBAdmSys/ychn-test/11)
+        self.email_id = ragic_config.get("field_email", "1005977")  # EMAILS (多值，逗號分隔)
+        self.name_id = ragic_config.get("field_name", "1005975")  # NAME
+        self.door_access_id = ragic_config.get("field_door_access_id", "1005983")  # EMPLOYEE_ID
         
         # Chinese name mappings for fuzzy matching
-        self.email_names = ["E-mail", "電子郵件", "email", "Email", "郵件"]
+        self.email_names = ["E-mail", "電子郵件", "email", "Email", "郵件", "E-Mail"]
         self.name_names = ["申請人", "姓名", "name", "Name", "員工姓名"]
-        self.door_access_names = ["門禁編號", "door_access", "DoorAccessId", "門禁卡號"]
+        self.door_access_names = ["員工編號", "employee_id", "EmployeeId", "門禁編號"]
 
 
-class RagicService:
+class RagicService(BaseRagicService):
     """
-    Core Ragic API service for employee verification.
+    Employee verification service (extends unified RagicService).
     
-    Uses fuzzy field name matching to handle Chinese field names
-    returned by the Ragic API.
+    This class adds employee-specific methods on top of the base CRUD service.
+    Uses fuzzy field name matching to handle Chinese field names.
     """
     
     def __init__(self) -> None:
-        # Load global config
+        # Initialize base service
+        super().__init__()
+        
+        # Load additional config for employee verification
         self._config_loader = ConfigLoader()
         self._config_loader.load()
         
         ragic_config = self._config_loader.get("ragic", {})
-        self._base_url = ragic_config.get("base_url", "https://ap13.ragic.com")
-        self._api_key = ragic_config.get("api_key", "")
-        self._sheet_path = ragic_config.get("employee_sheet_path", "/HSIBAdmSys/-3/4")
+        self._sheet_path = ragic_config.get("employee_sheet_path", "/HSIBAdmSys/ychn-test/11")
         
         self._field_config = RagicFieldConfig(self._config_loader._config)
     
@@ -92,37 +111,41 @@ class RagicService:
     
     async def get_all_employees(self) -> list[dict[str, Any]]:
         """
-        Fetch all employee records from Ragic.
+        Fetch all employee records from local database cache.
         
         Returns:
-            List of raw employee records.
+            List of employee records as dictionaries.
         """
-        import httpx
+        # Import here to avoid circular imports
+        from modules.administrative.models.account import AdministrativeAccount
         
-        url = f"{self._base_url}{self._sheet_path}"
-        
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.get(
-                    url,
-                    headers={"Authorization": f"Basic {self._api_key}"},
-                    params={"api": ""},
+        async with get_standalone_session() as session:
+            result = await session.execute(
+                select(AdministrativeAccount).where(
+                    AdministrativeAccount.status == True
                 )
-                resp.raise_for_status()
-                data = resp.json()
-                
-                # Ragic returns dict with record IDs as keys
-                if isinstance(data, dict):
-                    return list(data.values())
-                return []
-                
-        except Exception as e:
-            logger.error(f"Failed to fetch employees from Ragic: {e}")
-            return []
+            )
+            accounts = result.scalars().all()
+            
+            # Convert to dict format for compatibility
+            return [
+                {
+                    "ragic_id": acc.ragic_id,
+                    "account_id": acc.account_id,
+                    "name": acc.name,
+                    "emails": acc.emails,
+                    "employee_id": acc.employee_id,
+                    "status": acc.status,
+                }
+                for acc in accounts
+            ]
     
     async def verify_email_exists(self, email: str) -> RagicEmployeeData | None:
         """
-        Verify if an email exists in the Ragic employee database.
+        Verify if an email exists in the local database cache.
+        
+        Uses administrative_accounts table which is synced from Ragic.
+        Supports multi-value email field (comma-separated).
         
         Args:
             email: Email address to verify.
@@ -130,74 +153,80 @@ class RagicService:
         Returns:
             RagicEmployeeData if found, None otherwise.
         """
+        # Import here to avoid circular imports
+        from modules.administrative.models.account import AdministrativeAccount
+        
         email_lower = email.lower().strip()
-        employees = await self.get_all_employees()
+        logger.debug(f"Looking up email in local DB: {email_lower}")
         
-        for record in employees:
-            record_email = self._get_field_value(
-                record,
-                self._field_config.email_id,
-                self._field_config.email_names,
+        async with get_standalone_session() as session:
+            # Get all active accounts (we need to check multi-value emails)
+            result = await session.execute(
+                select(AdministrativeAccount).where(
+                    AdministrativeAccount.status == True
+                )
             )
+            accounts = result.scalars().all()
             
-            if record_email and record_email.lower().strip() == email_lower:
-                return self._parse_employee_record(record)
-        
-        return None
+            for account in accounts:
+                if account.emails:
+                    # Support multi-value email field (comma-separated)
+                    emails_in_record = [
+                        e.lower().strip() 
+                        for e in account.emails.split(",")
+                    ]
+                    if email_lower in emails_in_record:
+                        logger.info(f"Email found in local DB: {email} -> {account.name}")
+                        return self._account_to_employee_data(account)
+            
+            logger.warning(f"Email not found in local DB: {email}")
+            return None
     
     async def get_employee_by_id(self, employee_id: str) -> RagicEmployeeData | None:
         """
-        Get employee by their door access ID.
+        Get employee by their employee ID from local database cache.
         
         Args:
-            employee_id: Door access ID to look up.
+            employee_id: Employee ID to look up.
         
         Returns:
             RagicEmployeeData if found, None otherwise.
         """
-        employees = await self.get_all_employees()
+        # Import here to avoid circular imports
+        from modules.administrative.models.account import AdministrativeAccount
         
-        for record in employees:
-            door_id = self._get_field_value(
-                record,
-                self._field_config.door_access_id,
-                self._field_config.door_access_names,
+        async with get_standalone_session() as session:
+            result = await session.execute(
+                select(AdministrativeAccount).where(
+                    AdministrativeAccount.employee_id == employee_id.strip(),
+                    AdministrativeAccount.status == True
+                )
             )
+            account = result.scalar_one_or_none()
             
-            if door_id and door_id.strip() == employee_id.strip():
-                return self._parse_employee_record(record)
-        
-        return None
+            if account:
+                return self._account_to_employee_data(account)
+            
+            return None
     
-    def _parse_employee_record(self, record: dict[str, Any]) -> RagicEmployeeData:
-        """Parse a raw Ragic record into RagicEmployeeData."""
-        email = self._get_field_value(
-            record,
-            self._field_config.email_id,
-            self._field_config.email_names,
-        ) or ""
-        
-        name = self._get_field_value(
-            record,
-            self._field_config.name_id,
-            self._field_config.name_names,
-        ) or "Unknown"
-        
-        door_access_id = self._get_field_value(
-            record,
-            self._field_config.door_access_id,
-            self._field_config.door_access_names,
-        )
-        
-        # Use door access ID if available, otherwise use Ragic record ID
-        employee_id = door_access_id or str(record.get("_ragic_id", ""))
+    def _account_to_employee_data(self, account: Any) -> RagicEmployeeData:
+        """Convert AdministrativeAccount to RagicEmployeeData."""
+        # Handle multi-value email - use the first one
+        email = ""
+        if account.emails:
+            email = account.emails.split(",")[0].strip()
         
         return RagicEmployeeData(
-            employee_id=employee_id,
+            employee_id=account.employee_id or str(account.ragic_id),
             email=email,
-            name=name,
-            is_active=True,
-            raw_data=record,
+            name=account.name,
+            is_active=account.status,
+            raw_data={
+                "ragic_id": account.ragic_id,
+                "account_id": account.account_id,
+                "name": account.name,
+                "emails": account.emails,
+            },
         )
 
 

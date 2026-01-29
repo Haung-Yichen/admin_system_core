@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import httpx
+from core.ragic import RagicService
 from modules.administrative.core.config import get_admin_settings, RagicAccountFieldMapping as F
 
 
@@ -18,21 +18,23 @@ async def main():
     print(f"Looking for email: {email_to_find}")
     print("=" * 60)
     
-    async with httpx.AsyncClient(
-        timeout=30,
-        headers={"Authorization": f"Basic {settings.ragic_api_key.get_secret_value()}"}
-    ) as client:
-        response = await client.get(
-            settings.ragic_url_account,
-            params={"naming": "EID"}
+    # Use framework's RagicService
+    service = RagicService(
+        api_key=settings.ragic_api_key.get_secret_value(),
+        timeout=30.0,
+    )
+    
+    try:
+        records = await service.get_records_by_url(
+            full_url=settings.ragic_url_account,
+            params={"naming": "EID"},
         )
-        data = response.json()
+    finally:
+        await service.close()
     
     found = False
-    for ragic_id, record in data.items():
-        if ragic_id == "_metaData":
-            continue
-            
+    for record in records:
+        ragic_id = record.get("_ragicId", "unknown")
         emails = record.get(F.EMAILS, "") or ""
         name = record.get(F.NAME, "") or ""
         account_id = record.get(F.ACCOUNT_ID, "") or ""
@@ -56,10 +58,8 @@ async def main():
         print(f"✗ Email '{email_to_find}' NOT FOUND in Ragic raw data")
         print()
         print("Recent records in Ragic:")
-        count = 0
-        for ragic_id, record in list(data.items())[-5:]:
-            if ragic_id == "_metaData":
-                continue
+        for record in records[-5:]:
+            ragic_id = record.get("_ragicId", "unknown")
             name = record.get(F.NAME, "")
             emails = record.get(F.EMAILS, "")
             account_id = record.get(F.ACCOUNT_ID, "")

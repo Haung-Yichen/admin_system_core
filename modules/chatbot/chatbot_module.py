@@ -357,26 +357,22 @@ class ChatbotModule(IAppModule):
             return
 
         from core.database.session import get_thread_local_session
-        from core.services import get_auth_service
+        from core.line_auth import line_auth_check, LineAuthMessages
         from modules.chatbot.services import get_line_service
-        from modules.chatbot.routers.bot import create_auth_required_flex
 
         line_service = get_line_service()
-        auth_service = get_auth_service()
 
         async with get_thread_local_session() as db:
-            is_auth = await auth_service.is_user_authenticated(user_id, db)
+            is_auth, auth_messages = await line_auth_check(user_id, db)
 
         if is_auth:
             await line_service.reply(reply_token, [
                 {"type": "text", "text": "👋 歡迎回來！您可以直接輸入問題查詢 SOP。"}
             ])
         else:
-            flex_content = create_auth_required_flex(user_id)
-            await line_service.reply(reply_token, [
-                {"type": "text", "text": "👋 歡迎使用 HSIB SOP Bot！"},
-                {"type": "flex", "altText": "請驗證您的身份", "contents": flex_content}
-            ])
+            # 使用框架統一的驗證訊息
+            welcome_msg = {"type": "text", "text": "👋 歡迎使用 HSIB SOP Bot！"}
+            await line_service.reply(reply_token, [welcome_msg] + auth_messages)
 
     async def _handle_text_message(
         self, user_id: str, text: str, reply_token: str | None
@@ -386,26 +382,22 @@ class ChatbotModule(IAppModule):
             return
 
         from core.database.session import get_thread_local_session
-        from core.services import get_auth_service
+        from core.line_auth import line_auth_check
         from modules.chatbot.services import get_line_service, get_vector_service
         from modules.chatbot.routers.bot import (
-            create_auth_required_flex,
             create_sop_result_flex,
             create_no_result_flex,
         )
 
         line_service = get_line_service()
-        auth_service = get_auth_service()
         vector_service = get_vector_service()
 
         async with get_thread_local_session() as db:
-            is_auth = await auth_service.is_user_authenticated(user_id, db)
+            # 使用框架統一的驗證機制
+            is_auth, auth_messages = await line_auth_check(user_id, db)
 
             if not is_auth:
-                flex_content = create_auth_required_flex(user_id)
-                await line_service.reply(reply_token, [
-                    {"type": "flex", "altText": "請先驗證身份", "contents": flex_content}
-                ])
+                await line_service.reply(reply_token, auth_messages)
                 return
 
             try:

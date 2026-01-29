@@ -9,7 +9,6 @@ from core.services.auth import (
     AuthService,
     AuthError,
     EmailNotFoundError,
-    EmailSendError,
     UserBindingError,
     TokenAlreadyUsedError,
     TokenExpiredError,
@@ -25,6 +24,13 @@ from core.services.auth_token import (
     create_magic_link_token,
     decode_magic_link_token,
 )
+from core.services.email import (
+    EmailService,
+    EmailSendError,
+    EmailConfig,
+    EmailTemplates,
+    get_email_service,
+)
 
 __all__ = [
     # Ragic
@@ -34,7 +40,6 @@ __all__ = [
     "AuthService",
     "AuthError",
     "EmailNotFoundError",
-    "EmailSendError",
     "UserBindingError",
     "TokenAlreadyUsedError",
     "TokenExpiredError",
@@ -49,4 +54,10 @@ __all__ = [
     "MagicLinkPayload",
     "create_magic_link_token",
     "decode_magic_link_token",
+    # Email
+    "EmailService",
+    "EmailSendError",
+    "EmailConfig",
+    "EmailTemplates",
+    "get_email_service",
 ]

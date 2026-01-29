@@ -16,6 +16,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db_session
+from core.line_auth import (
+    get_verified_user,
+    VerifiedUser,
+    AUTH_ERROR_MESSAGES,
+    AccountNotBoundResponse,
+)
 from core.services import (
     AuthService,
     AuthError,
@@ -139,13 +145,8 @@ async def get_current_user_email(
     """
     Extract and verify LINE identity to get user's bound company email.
 
-    Authentication method:
-    - X-Line-ID-Token header or line_id_token query param - Verify LINE ID Token and extract sub
-    - Authorization: Bearer <token> header - Fallback for ID Token
-
-    The backend verifies the ID Token with LINE's API to securely extract
-    the user's identity (sub). This is more secure than trusting a user ID
-    directly from the frontend.
+    This is a wrapper around the framework's get_verified_user for backward
+    compatibility. New endpoints should use get_verified_user directly.
 
     Returns:
         str: User's bound company email.
@@ -181,14 +182,13 @@ async def get_current_user_email(
         binding_status = await auth_service.check_binding_status(id_token, db)
 
         if not binding_status["is_bound"]:
+            # 使用框架統一的錯誤回應格式
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail={
-                    "error": "account_not_bound",
-                    "message": "您的 LINE 帳號尚未綁定公司信箱，請先完成綁定。",
-                    "line_sub": binding_status["sub"],
-                    "line_name": binding_status.get("line_name"),
-                },
+                detail=AccountNotBoundResponse.create(
+                    line_sub=binding_status["sub"],
+                    line_name=binding_status.get("line_name"),
+                ),
             )
 
         return binding_status["email"]
@@ -197,21 +197,21 @@ async def get_current_user_email(
         logger.warning(f"LINE ID Token expired: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="LINE ID Token has expired. Please re-authenticate.",
+            detail=AUTH_ERROR_MESSAGES["token_expired"],
             headers={"WWW-Authenticate": "Bearer"},
         )
     except LineIdTokenInvalidError as e:
         logger.warning(f"LINE ID Token invalid: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid LINE ID Token: {e}",
+            detail=AUTH_ERROR_MESSAGES["token_invalid"],
             headers={"WWW-Authenticate": "Bearer"},
         )
     except LineIdTokenError as e:
         logger.error(f"LINE ID Token verification error: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"LINE ID Token verification failed: {e}",
+            detail=f"LINE authentication failed: {e}",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -408,14 +408,13 @@ async def post_leave_init(
             binding_status = await auth_service.check_binding_status(id_token, db)
             
             if not binding_status["is_bound"]:
+                # 使用框架統一的錯誤回應格式
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail={
-                        "error": "account_not_bound",
-                        "message": "您的 LINE 帳號尚未綁定公司信箱，請先完成綁定。",
-                        "line_sub": binding_status["sub"],
-                        "line_name": binding_status.get("line_name"),
-                    },
+                    detail=AccountNotBoundResponse.create(
+                        line_sub=binding_status["sub"],
+                        line_name=binding_status.get("line_name"),
+                    ),
                 )
             
             email = binding_status["email"]
@@ -424,13 +423,13 @@ async def post_leave_init(
             logger.warning(f"LINE ID Token expired: {e}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="LINE ID Token has expired. Please re-authenticate.",
+                detail=AUTH_ERROR_MESSAGES["token_expired"],
             )
         except (LineIdTokenInvalidError, LineIdTokenError) as e:
             logger.warning(f"LINE ID Token error: {e}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Invalid LINE ID Token: {e}",
+                detail=AUTH_ERROR_MESSAGES["token_invalid"],
             )
     
     logger.info(f"Leave init (POST) requested for email: {email}")

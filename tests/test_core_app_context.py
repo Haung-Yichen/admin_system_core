@@ -169,7 +169,7 @@ class TestAppContext:
         """Test ragic_service property lazily initializes."""
         from core.app_context import AppContext
         
-        with patch('services.ragic_service.RagicService') as MockRagicService:
+        with patch('core.ragic.RagicService') as MockRagicService:
             mock_instance = MagicMock()
             MockRagicService.return_value = mock_instance
             

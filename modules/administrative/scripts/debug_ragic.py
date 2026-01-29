@@ -1,6 +1,6 @@
 """Debug test with minimal records."""
 import asyncio
-import httpx
+from core.ragic import RagicService
 from modules.administrative.core.config import get_admin_settings, RagicAccountFieldMapping as Fields
 
 
@@ -14,35 +14,34 @@ async def test():
     print(f"Account URL: {settings.ragic_url_account}")
     print()
     
-    # Fetch just a few records
-    async with httpx.AsyncClient(
-        timeout=30, 
-        headers={'Authorization': f'Basic {settings.ragic_api_key.get_secret_value()}'}
-    ) as client:
-        response = await client.get(
-            settings.ragic_url_account,
-            params={"naming": "EID"}
-        )
-        data = response.json()
+    # Use framework's RagicService
+    service = RagicService(
+        api_key=settings.ragic_api_key.get_secret_value(),
+        timeout=30.0,
+    )
     
-    # Get first 5 records
-    records = []
-    for k, v in list(data.items())[:7]:
-        if k != '_metaData':
-            v['_ragicId'] = int(k)
-            records.append(v)
+    try:
+        records = await service.get_records_by_url(
+            full_url=settings.ragic_url_account,
+            params={"naming": "EID"},
+        )
+    finally:
+        await service.close()
+    
+    # Get first 7 records
+    records = records[:7]
     
     print(f"Testing with {len(records)} records:")
     print("-" * 60)
     
     for r in records:
         ragic_id = r.get(Fields.RAGIC_ID, '') or r.get('_ragicId')
-        account_id = r.get(Fields.ACCOUNT_ID, '').strip()
-        name = r.get(Fields.NAME, '').strip()
+        account_id = (r.get(Fields.ACCOUNT_ID, '') or '').strip()
+        name = (r.get(Fields.NAME, '') or '').strip()
         status = r.get(Fields.STATUS, '')
-        org_code = r.get(Fields.ORG_CODE, '').strip()
-        org_name = r.get(Fields.ORG_NAME, '').strip()
-        emails = r.get(Fields.EMAILS, '').strip()
+        org_code = (r.get(Fields.ORG_CODE, '') or '').strip()
+        org_name = (r.get(Fields.ORG_NAME, '') or '').strip()
+        emails = (r.get(Fields.EMAILS, '') or '').strip()
         
         status_str = "Active" if status == "1" else "Disabled"
         

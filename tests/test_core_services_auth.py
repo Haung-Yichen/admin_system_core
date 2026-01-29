@@ -117,7 +117,7 @@ class TestAuthService:
         link = auth_service.generate_magic_link(
             "test@example.com", "U1234567890")
 
-        assert "https://test.example.com/auth/verify?token=" in link
+        assert "https://test.example.com/api/auth/verify?token=" in link
 
     def test_get_auth_service_singleton(self, mock_env_vars):
         """Test get_auth_service() returns singleton."""

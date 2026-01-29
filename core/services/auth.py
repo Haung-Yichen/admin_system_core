@@ -44,9 +44,8 @@ class EmailNotFoundError(AuthError):
     pass
 
 
-class EmailSendError(AuthError):
-    """Raised when email sending fails."""
-    pass
+# Import EmailSendError from email module for consistency
+from core.services.email import EmailSendError
 
 
 class UserBindingError(AuthError):

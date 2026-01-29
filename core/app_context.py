@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 if TYPE_CHECKING:
     from services.line_client import LineClient
-    from services.ragic_service import RagicService
+    from core.ragic import RagicService
 
 
 @dataclass
@@ -72,10 +72,10 @@ class ConfigLoader:
             "ragic": {
                 "api_key": os.getenv("RAGIC_API_KEY", ""),
                 "base_url": os.getenv("RAGIC_BASE_URL", "https://ap13.ragic.com"),
-                "employee_sheet_path": os.getenv("RAGIC_EMPLOYEE_SHEET_PATH", "/HSIBAdmSys/-3/4"),
-                "field_email": os.getenv("RAGIC_FIELD_EMAIL", "1000381"),
-                "field_name": os.getenv("RAGIC_FIELD_NAME", "1000376"),
-                "field_door_access_id": os.getenv("RAGIC_FIELD_DOOR_ACCESS_ID", "1000375")
+                "employee_sheet_path": os.getenv("RAGIC_EMPLOYEE_SHEET_PATH", "/HSIBAdmSys/ychn-test/11"),
+                "field_email": os.getenv("RAGIC_FIELD_EMAIL", "1005977"),
+                "field_name": os.getenv("RAGIC_FIELD_NAME", "1005975"),
+                "field_door_access_id": os.getenv("RAGIC_FIELD_DOOR_ACCESS_ID", "1005983")
             }
         }
     
@@ -144,8 +144,8 @@ class AppContext:
     def ragic_service(self) -> "RagicService":
         """Lazy initialization of Ragic service."""
         if self._ragic_service is None:
-            from services.ragic_service import RagicService
-            self._ragic_service = RagicService(self._config_loader)
+            from core.ragic import RagicService
+            self._ragic_service = RagicService()
         return self._ragic_service
     
     def log_event(self, message: str, level: str = "INFO") -> None:

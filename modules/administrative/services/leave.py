@@ -7,6 +7,10 @@ Follows Single Responsibility Principle - only handles leave-related operations.
 Authentication is handled by the Router layer via LINE ID Token (OIDC).
 This service receives the verified email directly and uses it to look up
 the employee profile from the local cache.
+
+Note:
+    This service uses the framework's core.ragic.RagicService for all
+    Ragic API communication instead of managing HTTP clients directly.
 """
 
 import logging
@@ -14,11 +18,11 @@ import os
 import time
 from typing import Any
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_standalone_session
+from core.ragic import RagicService
 from modules.administrative.core.config import (
     AdminSettings,
     RagicLeaveFieldMapping,
@@ -73,29 +77,21 @@ class LeaveService:
             settings: Admin module settings. Uses singleton if not provided.
         """
         self._settings = settings or get_admin_settings()
-        self._http_client: httpx.AsyncClient | None = None
+        
+        # Use framework's RagicService for all Ragic API operations
+        self._ragic_service = RagicService(
+            api_key=self._settings.ragic_api_key.get_secret_value(),
+            timeout=float(self._settings.sync_timeout_seconds),
+        )
+        
+        # Schema cache for form validation
         self._form_schema_cache: dict[str, Any] | None = None
         self._schema_cache_time: float = 0
         self._schema_cache_ttl: int = 300  # 5 minutes cache
 
-    @property
-    def _client(self) -> httpx.AsyncClient:
-        """Lazy-initialized HTTP client for Ragic API calls."""
-        if self._http_client is None:
-            self._http_client = httpx.AsyncClient(
-                timeout=httpx.Timeout(self._settings.sync_timeout_seconds),
-                headers={
-                    "Authorization": f"Basic {self._settings.ragic_api_key.get_secret_value()}",
-                    "Content-Type": "application/json",
-                },
-            )
-        return self._http_client
-
     async def close(self) -> None:
-        """Close HTTP client."""
-        if self._http_client is not None:
-            await self._http_client.aclose()
-            self._http_client = None
+        """Close the Ragic service HTTP client."""
+        await self._ragic_service.close()
 
     # =========================================================================
     # Account Profile Lookup
@@ -248,12 +244,11 @@ class LeaveService:
             current_time - self._schema_cache_time < self._schema_cache_ttl):
             return self._form_schema_cache
             
-        url = f"{self._settings.ragic_url_leave}?info=1"
         try:
-            logger.info(f"Fetching Ragic form schema from {url}")
-            response = await self._client.get(url)
-            response.raise_for_status()
-            self._form_schema_cache = response.json()
+            logger.info(f"Fetching Ragic form schema from {self._settings.ragic_url_leave}")
+            self._form_schema_cache = await self._ragic_service.get_form_schema(
+                full_url=self._settings.ragic_url_leave
+            )
             self._schema_cache_time = current_time
             return self._form_schema_cache
         except Exception as e:
@@ -677,12 +672,15 @@ class LeaveService:
                 f"name: {ragic_payload.get(RagicLeaveFieldMapping.EMPLOYEE_NAME)}"
             )
             
-            response = await self._client.post(
-                self._settings.ragic_url_leave,
-                json=ragic_payload,
+            # Use framework's RagicService for submission
+            result = await self._ragic_service.create_record_by_url(
+                full_url=self._settings.ragic_url_leave,
+                data=ragic_payload,
             )
-            response.raise_for_status()
-            result = response.json()
+            
+            if not result:
+                raise SubmissionError("Failed to submit leave request to Ragic")
+            
             ragic_id = result.get("_ragicId")
             ragic_ids.append(ragic_id)
             submitted_dates = leave_dates
