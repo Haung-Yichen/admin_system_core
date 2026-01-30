@@ -412,7 +412,7 @@ class AuthService:
 
         token = create_magic_link_token(email, line_sub)
         base_url = self._config_loader.get("server.base_url", "")
-        return f"{base_url}/api/auth/verify?token={token}"
+        return f"{base_url}/auth/verify?token={token}"
 
     async def verify_magic_token(
         self,

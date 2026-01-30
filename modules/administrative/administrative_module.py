@@ -14,9 +14,11 @@ from typing import Any, Optional, TYPE_CHECKING
 from fastapi import APIRouter
 
 from core.interface import IAppModule
+from core.ragic import get_sync_manager
 from modules.administrative.core.config import get_admin_settings
 from modules.administrative.routers import leave_router, liff_router
 from modules.administrative.services.ragic_sync import RagicSyncService
+from modules.administrative.services.account_sync import AccountSyncService
 from modules.administrative.services.rich_menu import RichMenuService
 
 if TYPE_CHECKING:
@@ -76,8 +78,21 @@ class AdministrativeModule(IAppModule):
         self._api_router.include_router(leave_router)
         self._api_router.include_router(liff_router)
 
-        # Initialize sync service
+        # Initialize sync service (legacy full sync)
         self._sync_service = RagicSyncService()
+
+        # Register SyncManager Service (New Webhook support)
+        try:
+            sync_manager = get_sync_manager()
+            sync_manager.register(
+                key="administrative_account",
+                name="Employee Accounts",
+                service=AccountSyncService(),
+                module_name=self.get_module_name(),
+                auto_sync_on_startup=False, # We use the legacy full sync for now
+            )
+        except Exception as e:
+            logger.error(f"Failed to register AccountSyncService: {e}")
 
         # Trigger async data sync in background
         self._start_ragic_sync()

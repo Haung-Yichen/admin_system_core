@@ -90,9 +90,9 @@ class FastAPIServer:
     def _register_routes(self, app: FastAPI) -> None:
         """Register API routes."""
 
-        # Register core authentication router with /api prefix
+        # Register core authentication router (no prefix - uses /auth directly)
         from core.api.auth import router as auth_router
-        app.include_router(auth_router, prefix="/api")
+        app.include_router(auth_router)  # /auth/login, /auth/verify, etc.
 
         @app.get("/")
         async def root():

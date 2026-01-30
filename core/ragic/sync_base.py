@@ -211,9 +211,12 @@ class BaseRagicSyncService(ABC, Generic[ModelT]):
                                 result.skipped += 1
                     except Exception as e:
                         result.errors += 1
-                        error_msg = f"Error syncing record {record.get('_ragicId')}: {e}"
+                        error_msg = f"Error syncing record {record.get('_ragicId')}: {type(e).__name__}: {e}"
                         result.error_messages.append(error_msg)
                         logger.error(error_msg)
+                        # Print full traceback for debugging
+                        import traceback
+                        logger.debug(f"Full traceback: {traceback.format_exc()}")
                 
                 # 最後統一提交成功的資料
                 await session.commit()

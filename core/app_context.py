@@ -46,6 +46,7 @@ class ConfigLoader:
                 "url": os.getenv("DATABASE_URL", "")
             },
             "security": {
+                "key": os.getenv("SECURITY_KEY", ""),
                 "jwt_secret_key": os.getenv("JWT_SECRET_KEY", ""),
                 "jwt_algorithm": os.getenv("JWT_ALGORITHM", "HS256"),
                 "magic_link_expire_minutes": int(os.getenv("MAGIC_LINK_EXPIRE_MINUTES", "15"))
