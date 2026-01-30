@@ -69,6 +69,89 @@ class LineClient:
         """Check if credentials are set."""
         return bool(self._channel_secret and self._access_token)
     
+    async def check_connection(self) -> dict:
+        """
+        Check LINE Bot API connectivity for dashboard health monitoring.
+        
+        Performs a GET request to /v2/bot/info to verify:
+        1. Network connectivity to LINE servers
+        2. Access token validity
+        3. Bot profile information
+        
+        Returns:
+            dict: Health check result with structure:
+                {
+                    "status": "healthy" | "warning" | "error",
+                    "message": "Description of the status",
+                    "details": {
+                        "Bot Name": "My Bot",
+                        "Bot ID": "Uxxxxxxxxx",
+                        "Latency": "123ms",
+                    }
+                }
+        """
+        import time
+        
+        if not self.is_configured():
+            return {
+                "status": "error",
+                "message": "Not configured",
+                "details": {
+                    "Channel Secret": "Not set" if not self._channel_secret else "Set",
+                    "Access Token": "Not set" if not self._access_token else "Set",
+                }
+            }
+        
+        try:
+            start_time = time.time()
+            
+            resp = await self._client.get(
+                f"{self.API_BASE}/info",
+                headers=self._headers(),
+                timeout=10.0
+            )
+            
+            latency_ms = int((time.time() - start_time) * 1000)
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                return {
+                    "status": "healthy",
+                    "message": "Connected",
+                    "details": {
+                        "Bot Name": data.get("displayName", "Unknown"),
+                        "Bot ID": data.get("userId", "Unknown")[:12] + "...",
+                        "Latency": f"{latency_ms}ms",
+                    }
+                }
+            elif resp.status_code == 401:
+                return {
+                    "status": "error",
+                    "message": "Invalid token",
+                    "details": {
+                        "Latency": f"{latency_ms}ms",
+                        "Error": "Access token invalid or expired",
+                    }
+                }
+            else:
+                return {
+                    "status": "warning",
+                    "message": f"HTTP {resp.status_code}",
+                    "details": {
+                        "Latency": f"{latency_ms}ms",
+                    }
+                }
+                
+        except Exception as e:
+            self._logger.error(f"LINE health check failed: {e}")
+            return {
+                "status": "error",
+                "message": "Connection failed",
+                "details": {
+                    "Error": str(e)[:50],
+                }
+            }
+    
     def verify_signature(self, body: bytes, signature: str) -> bool:
         """Verify LINE webhook signature."""
         if not self._channel_secret:

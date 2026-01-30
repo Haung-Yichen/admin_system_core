@@ -73,6 +73,100 @@ class RagicService:
         """Check if the service is properly configured."""
         return bool(self._api_key and self._base_url)
     
+    async def check_connection(self) -> dict:
+        """
+        Check Ragic API connectivity for dashboard health monitoring.
+        
+        Performs a lightweight API call to verify:
+        1. Network connectivity to Ragic servers
+        2. API key validity
+        3. Response latency
+        
+        Returns:
+            dict: Health check result with structure:
+                {
+                    "status": "healthy" | "warning" | "error",
+                    "message": "Description of the status",
+                    "details": {
+                        "Latency": "123ms",
+                        "Base URL": "https://ap13.ragic.com",
+                        "API Key": "****xxxx",
+                    }
+                }
+        """
+        import time
+        
+        if not self.is_configured():
+            return {
+                "status": "error",
+                "message": "Not configured",
+                "details": {
+                    "Base URL": self._base_url or "Not set",
+                    "API Key": "Not set",
+                }
+            }
+        
+        # Mask API key for display (show last 4 chars)
+        masked_key = f"****{self._api_key[-4:]}" if len(self._api_key) > 4 else "****"
+        
+        try:
+            start_time = time.time()
+            client = self._get_client()
+            
+            # Use a lightweight request - fetch API info or a small dataset
+            # Ragic doesn't have a dedicated health endpoint, so we try to access the base
+            response = await client.get(
+                self._base_url,
+                params={"api": ""},
+                timeout=10.0
+            )
+            
+            latency_ms = int((time.time() - start_time) * 1000)
+            
+            if response.status_code == 200:
+                return {
+                    "status": "healthy",
+                    "message": "Connected",
+                    "details": {
+                        "Latency": f"{latency_ms}ms",
+                        "Base URL": self._base_url,
+                        "API Key": masked_key,
+                    }
+                }
+            elif response.status_code == 401:
+                return {
+                    "status": "error",
+                    "message": "Authentication failed",
+                    "details": {
+                        "Latency": f"{latency_ms}ms",
+                        "Base URL": self._base_url,
+                        "API Key": masked_key,
+                        "Error": "Invalid API Key",
+                    }
+                }
+            else:
+                return {
+                    "status": "warning",
+                    "message": f"HTTP {response.status_code}",
+                    "details": {
+                        "Latency": f"{latency_ms}ms",
+                        "Base URL": self._base_url,
+                        "API Key": masked_key,
+                    }
+                }
+                
+        except Exception as e:
+            logger.error(f"Ragic health check failed: {e}")
+            return {
+                "status": "error",
+                "message": "Connection failed",
+                "details": {
+                    "Base URL": self._base_url,
+                    "API Key": masked_key,
+                    "Error": str(e)[:50],
+                }
+            }
+    
     def _build_url(self, sheet_path: str, record_id: Optional[int] = None) -> str:
         """Build API URL for a sheet/record."""
         # Ensure sheet_path starts with /

@@ -79,18 +79,53 @@ class IAppModule(ABC):
 
     def get_status(self) -> dict:
         """
-        Returns the current status of the module for monitoring.
+        Returns the current status of the module for dashboard monitoring.
+        
+        **Dashboard Card SOP (Standard Operating Procedure)**
+        
+        All modules should implement this method to display status cards
+        on the admin dashboard. The returned data will be rendered as a card
+        with a status indicator (green/yellow/red) and key-value details.
         
         Returns:
             dict: Status info with structure:
-                  {
-                      "status": "active" | "warning" | "error" | "initializing",
-                      "details": { "key": "value" }
-                  }
+                {
+                    "status": "healthy" | "warning" | "error" | "initializing",
+                    "message": "Optional status message shown under the title",
+                    "details": {
+                        "Primary Metric": "100",       # First item shown prominently
+                        "Secondary Info": "Normal",    # Additional key-value pairs
+                        "Last Sync": "2 min ago",
+                    },
+                    "subsystems": [                     # Optional: show child system status
+                        {"name": "Leave System", "status": "healthy"},
+                        {"name": "Expense System", "status": "warning"},
+                    ]
+                }
+        
+        Status Values:
+            - "healthy": Green indicator - everything working normally
+            - "warning": Yellow indicator - degraded but operational
+            - "error": Red indicator - critical issue requires attention
+            - "initializing": Blue indicator - module is starting up
+        
+        Example Implementation:
+            def get_status(self) -> dict:
+                sop_count = self._get_sop_count()
+                return {
+                    "status": "healthy" if sop_count > 0 else "warning",
+                    "message": "Knowledge base loaded",
+                    "details": {
+                        "SOP Documents": str(sop_count),
+                        "Model Status": "Ready",
+                    }
+                }
         """
         return {
-            "status": "active",
-            "details": {}
+            "status": "healthy",
+            "message": "",
+            "details": {},
+            "subsystems": []
         }
 
     # =========================================================================

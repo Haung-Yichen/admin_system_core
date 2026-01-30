@@ -195,7 +195,8 @@ def main() -> None:
         "host": host,
         "port": port,
         "reload": debug,
-        "log_level": "info",
+        "log_level": "warning",  # Suppress uvicorn info logs
+        "access_log": False,     # Disable uvicorn access logs
     }
 
     # If reload is enabled, exclude logs and cache directories

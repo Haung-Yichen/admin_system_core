@@ -78,3 +78,7 @@ def setup_logging(log_level: int = logging.INFO) -> None:
     logging.getLogger("watchfiles").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
+    # Ensure uvicorn logs are suppressed, though they are usually handled by uvicorn config
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn").setLevel(logging.WARNING)

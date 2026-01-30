@@ -68,6 +68,14 @@ class FastAPIServer:
         # Add request logging middleware
         @app.middleware("http")
         async def log_requests(request: Request, call_next):
+            # Paths to suppress logging for (frequent polls or health checks)
+            start_path = request.url.path
+            if (
+                start_path in ["/", "/health", "/api/system/dashboard", "/api/system/logs"]
+                or start_path.startswith(("/static", "/api/system/dashboard", "/api/system/logs"))
+            ):
+                return await call_next(request)
+
             self._logger.info(f"HTTP {request.method} {request.url.path}")
             response = await call_next(request)
             self._logger.info(
