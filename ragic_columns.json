@@ -135,5 +135,20 @@
       "LEAVE_TYPE_NAME": "3005178",
       "DEDUCTION_MULTIPLIER": "3005179"
     }
+  },
+
+  "sop_form": {
+    "description": "SOP知識庫 - 作業流程文件",
+    "url": "https://ap13.ragic.com/HSIBAdmSys/ychn-test/12",
+    "sheet_path": "/HSIBAdmSys/ychn-test/12",
+    "key_field": "1006067",
+    "fields": {
+      "RAGIC_ID": "_ragicId",
+      "SOP_ID": "1006062",
+      "TITLE": "1006063",
+      "CATEGORY": "1006064",
+      "KEYWORDS": "1006065",
+      "CONTENT": "1006066"
+    }
   }
 }

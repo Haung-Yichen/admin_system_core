@@ -6,10 +6,10 @@ Uses pgvector for vector similarity search on embeddings.
 Sensitive fields are encrypted using framework-level EncryptedType.
 """
 
-from typing import Any
+from typing import Any, Optional
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Boolean, Index, String
+from sqlalchemy import Boolean, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,11 +30,15 @@ class SOPDocument(Base, TimestampMixin):
     """
     SOP Document model for storing searchable SOP content with vector embeddings.
     
+    Synced from Ragic SOP知識庫表單 (Form 12).
+    
     Attributes:
-        id: UUID primary key.
+        id: UUID primary key (local).
+        ragic_id: Ragic record ID for sync (unique).
+        sop_id: SOP identifier (e.g., "SOP-001").
         title: Document title for display.
         content: Full text content of the SOP.
-        embedding: Vector embedding for similarity search (384 dimensions for MiniLM).
+        embedding: Vector embedding for similarity search.
         category: Optional category for filtering.
         tags: Optional tags as JSON array.
         metadata: Additional metadata as JSON.
@@ -44,6 +48,23 @@ class SOPDocument(Base, TimestampMixin):
     __tablename__ = "sop_documents"
     
     id: Mapped[UUIDPrimaryKey]
+    
+    # Ragic sync fields
+    ragic_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        unique=True,
+        nullable=True,
+        index=True,
+        comment="Ragic record ID for sync",
+    )
+    sop_id: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        unique=True,
+        nullable=True,
+        index=True,
+        comment="SOP identifier (e.g., SOP-001)",
+    )
+    
     title: Mapped[str] = mapped_column(
         String(512),
         nullable=False,
@@ -98,4 +119,4 @@ class SOPDocument(Base, TimestampMixin):
     )
     
     def __repr__(self) -> str:
-        return f"<SOPDocument(id={self.id}, title={self.title[:50]}...)>"
+        return f"<SOPDocument(id={self.id}, sop_id={self.sop_id}, title={self.title[:50]}...)>"

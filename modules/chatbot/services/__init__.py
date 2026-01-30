@@ -10,6 +10,10 @@ from modules.chatbot.services.json_import_service import (
     JsonValidationError,
     get_json_import_service,
 )
+from modules.chatbot.services.ragic_sync import (
+    SOPSyncService,
+    get_sop_sync_service,
+)
 
 __all__ = [
     "LineService", 
@@ -20,4 +24,6 @@ __all__ = [
     "JsonParseError",
     "JsonValidationError",
     "get_json_import_service",
+    "SOPSyncService",
+    "get_sop_sync_service",
 ]

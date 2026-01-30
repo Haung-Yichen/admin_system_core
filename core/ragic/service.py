@@ -267,7 +267,7 @@ class RagicService:
         
         try:
             client = self._get_client()
-            response = await client.get(url, params={"api": ""})
+            response = await client.get(url, params={"api": "", "naming": "EID"})
             response.raise_for_status()
             return response.json()
             

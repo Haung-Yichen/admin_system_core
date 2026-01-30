@@ -5,7 +5,21 @@ Admin System Core 提供了一套統一的、型別安全的 Ragic 整合層，�
 
 ---
 
-## 架構設計
+## 整合策略選擇 (Strategy Selection)
+
+Admin System Core 支援兩種與 Ragic 互動的模式，請依據業務場景選擇：
+
+| 特性 | Repository Pattern (即時存取) | Sync Pattern (本地快取) |
+| :--- | :--- | :--- |
+| **適用情境** | 寫入資料、即時性要求高、單筆查詢 | 讀取頻率高、需要關聯查詢 (Join)、報表統計 |
+| **資料來源** | 直接呼叫 Ragic API | 本地 PostgreSQL 資料庫 |
+| **延遲** | 較高 (HTTP RTT) | 極低 (Local DB Query) |
+| **實作位置** | Core Framework (`core/ragic`) | Module (`modules/administrative/services/ragic_sync.py`) |
+| **範例** | 提交請假單、寫入打卡紀錄 | 員工名單查詢、部門組織樹、假別清單 |
+
+---
+
+## 模式一：Repository Pattern (即時存取)
 
 整合層採用 **Repository Pattern** 設計，將資料存取與業務邏輯分離：
 
@@ -87,16 +101,65 @@ data = await service.get_records_by_url(
 
 ---
 
+## 模式二：Sync Pattern (本地快取)
+
+適用於基礎資料庫 (Master Data) 的維護，如員工資料、產品清單。
+此模式由具體業務模組 (Module) 實作，例如 `modules/administrative/services/ragic_sync.py`。
+
+### 實作流程 (Implementation Workflow)
+
+若需新增一個同步表單（例如「加班單快取」），請遵循以下標準流程：
+
+#### 1. 定義資料庫模型 (Database Model)
+在模組的 models 資料夾 (如 `modules/administrative/models/overtime.py`) 建立 SQLAlchemy 模型。
+
+```python
+class OvertimeRecord(Base):
+    __tablename__ = "administrative_overtime_records"
+    ragic_id = Column(Integer, primary_key=True)  # 使用 Ragic ID 作為 PK
+    employee_id = Column(String, index=True)
+    hours = Column(Float)
+```
+
+#### 2. 定義資料驗證 (Schema Validation)
+在 Sync Service 中定義 Pydantic Schema 以處理資料清洗與轉型。
+
+```python
+class OvertimeSchema(BaseModel):
+    ragic_id: int
+    employee_id: str
+    hours: float
+    
+    @field_validator("hours", mode="before")
+    def parse_hours(cls, v):
+        return float(v) if v else 0.0
+```
+
+#### 3. 實作同步邏輯 (Implement Sync Logic)
+擴充 `RagicSyncService`，實作 Fetch -> Validate -> Upsert 流程。
+使用 `INSERT ... ON CONFLICT DO UPDATE` 語法確保 **Idempotency (冪等性)**。
+
+```python
+async def sync_overtime(self):
+    # 1. Fetch raw data from Ragic
+    raw_data = await self._fetch_form_data(self._settings.ragic_url_overtime)
+    
+    # 2. Upsert to DB
+    async with get_thread_local_session() as session:
+        # Implementation details...
+        pass
+```
+
+---
+
 ## 最佳實踐
 
 ### 1. 避免硬編碼 Field ID
+建議將 Field ID 集中管理 (如 `config.py`)，確保 Ragic 欄位變更時只需修改一處。
 
-建議將 Field ID 集中管理 (如 `config.py`)，或直接寫在 Model 定義中作為 Single Source of Truth。
-
-### 2. 使用本地快取
-
-對於頻繁存取的 master data (如員工名單、部門)，**不應** 每次都呼叫 Ragic API。
-應使用 **Sync Pattern** 將資料同步至本地 PostgreSQL 資料庫。
+### 2. 資料一致性與唯讀原則
+Sync Pattern 採用 **Eventual Consistency (最終一致性)**。
+本地資料庫僅作為 Ragic 的 Read-Replica，**嚴禁** 直接修改本地快取表中的資料，所有寫入必須回到 Ragic (透過 Repository Pattern)。
 
 參考實作：`modules/administrative/services/ragic_sync.py`。
 

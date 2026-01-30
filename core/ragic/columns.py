@@ -131,19 +131,25 @@ class RagicFormConfig:
 
 
 # Pre-configured form accessors (singleton-like)
-@lru_cache(maxsize=3)
+@lru_cache(maxsize=5)
 def get_account_form() -> RagicFormConfig:
     """Get Account form configuration."""
     return RagicFormConfig("account_form")
 
 
-@lru_cache(maxsize=3)
+@lru_cache(maxsize=5)
 def get_leave_form() -> RagicFormConfig:
     """Get Leave form configuration."""
     return RagicFormConfig("leave_form")
 
 
-@lru_cache(maxsize=3)
+@lru_cache(maxsize=5)
 def get_leave_type_form() -> RagicFormConfig:
     """Get Leave Type form configuration."""
     return RagicFormConfig("leave_type_form")
+
+
+@lru_cache(maxsize=5)
+def get_sop_form() -> RagicFormConfig:
+    """Get SOP Knowledge Base form configuration."""
+    return RagicFormConfig("sop_form")

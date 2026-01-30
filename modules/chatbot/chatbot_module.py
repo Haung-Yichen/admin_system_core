@@ -6,13 +6,16 @@ Implements IAppModule interface for integration with the admin system framework.
 
 import asyncio
 import logging
+import threading
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from fastapi import APIRouter
 
 from core.interface import IAppModule
+from core.ragic import get_sync_manager
 from modules.chatbot.core.config import get_chatbot_settings
 from modules.chatbot.routers import sop_router
+from modules.chatbot.services.ragic_sync import get_sop_sync_service
 
 if TYPE_CHECKING:
     from core.app_context import AppContext
@@ -26,6 +29,12 @@ class ChatbotModule(IAppModule):
     SOP Chatbot Module.
 
     Provides LINE Bot integration for SOP search with Magic Link authentication.
+    
+    Features:
+        - SOP knowledge base synced from Ragic on startup
+        - Webhook endpoint for real-time Ragic updates
+        - Vector embedding search for SOP queries
+        - LINE Bot integration
     """
 
     def __init__(self) -> None:
@@ -43,19 +52,32 @@ class ChatbotModule(IAppModule):
             context: Application context from the main framework.
         """
         self._context = context
-        logger.info("Chatbot module initialized")
+        logger.info("Chatbot module initializing...")
 
         # Build the aggregated API router
         # Note: Auth router is now handled by core framework at /auth/*
         # Note: LINE webhook is now handled by core framework at /webhook/line/{module_name}
+        # Note: Ragic webhook is now handled by core framework at /api/webhooks/ragic?source=chatbot_sop
         self._api_router = APIRouter()
         self._api_router.include_router(sop_router)
+
+        # Register SOP sync service with the core SyncManager
+        # The SyncManager handles background sync on startup and webhook dispatch
+        sync_manager = get_sync_manager()
+        sync_manager.register(
+            key="chatbot_sop",
+            name="SOP Knowledge Base",
+            service=get_sop_sync_service(),
+            module_name=self.get_module_name(),
+            auto_sync_on_startup=True,
+        )
 
         # Preload embedding model to avoid first-query delay
         self._preload_model()
 
         context.log_event(
             "Chatbot module loaded with LINE Bot SOP search", "CHATBOT")
+        logger.info("Chatbot module initialized")
 
     def _preload_model(self) -> None:
         """Preload the embedding model in background to reduce first query latency."""
@@ -76,9 +98,6 @@ class ChatbotModule(IAppModule):
 
         # Start stats updater
         self._start_stats_updater()
-
-        # Start file watcher for sop_samples.json
-        self._start_file_watcher()
 
     def _start_stats_updater(self) -> None:
         """Start a background thread to update module stats periodically."""
@@ -120,151 +139,6 @@ class ChatbotModule(IAppModule):
 
         stats_thread = threading.Thread(target=update_loop, daemon=True)
         stats_thread.start()
-
-    def _start_file_watcher(self) -> None:
-        """Start file watcher to monitor sop_samples.json and sync changes to DB."""
-        import threading
-        import json
-        import time
-        import hashlib
-        from pathlib import Path
-
-        self._last_file_hash: str | None = None
-
-        def get_file_hash(filepath: Path) -> str | None:
-            """Calculate MD5 hash of file content."""
-            if not filepath.exists():
-                return None
-            try:
-                with open(filepath, "rb") as f:
-                    return hashlib.md5(f.read()).hexdigest()
-            except Exception:
-                return None
-
-        # Store reference to main event loop for thread-safe scheduling
-        try:
-            main_loop = asyncio.get_running_loop()
-        except RuntimeError:
-            main_loop = None
-            logger.warning(
-                "No running event loop found, file watcher will use thread-local loop")
-
-        def sync_file_to_db():
-            """Sync JSON file content to database."""
-            import asyncio
-            from sqlalchemy import text, select
-            from core.database.session import get_thread_local_session
-            from modules.chatbot.services.vector_service import get_vector_service
-            from modules.chatbot.models import SOPDocument
-
-            json_path = Path(__file__).parent / "data" / "sop_samples.json"
-
-            # Check if file exists - if not, just skip (don't delete DB data)
-            if not json_path.exists():
-                logger.info(
-                    "sop_samples.json not found, keeping existing DB data.")
-                return
-
-            # Check if file changed
-            current_hash = get_file_hash(json_path)
-            if current_hash == self._last_file_hash:
-                return  # No change
-
-            self._last_file_hash = current_hash
-            logger.info("sop_samples.json changed, syncing to database...")
-
-            async def do_sync():
-                try:
-                    with open(json_path, "r", encoding="utf-8") as f:
-                        samples = json.load(f)
-                except Exception as e:
-                    logger.error(f"Failed to read sop_samples.json: {e}")
-                    return
-
-                # 使用框架提供的 Thread-Local Session
-                async with get_thread_local_session() as session:
-                    vector_service = get_vector_service()
-
-                    for item in samples:
-                        original_id = item.get("id")
-
-                        # Check if document exists by original_id
-                        stmt = select(SOPDocument).where(
-                            SOPDocument.metadata_[
-                                'original_id'].astext == original_id
-                        )
-                        result = await session.execute(stmt)
-                        existing_doc = result.scalar_one_or_none()
-
-                        text_to_embed = f"{item['title']}\n\n{item['content']}"
-                        # generate_embedding is CPU-bound, safe to call from any thread
-                        embedding = vector_service.generate_embedding(
-                            text_to_embed)
-
-                        if existing_doc:
-                            # Update existing using ORM to ensure encryption works
-                            existing_doc.title = item["title"]
-                            existing_doc.content = item["content"]
-                            existing_doc.category = item.get("category")
-                            existing_doc.tags = item.get("tags", [])
-                            existing_doc.embedding = embedding
-                            # metadata is JSONB, better to update copy
-                            meta = dict(existing_doc.metadata_ or {})
-                            meta["updated_at"] = time.strftime(
-                                "%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                            existing_doc.metadata_ = meta
-
-                            logger.info(f"Updated SOP: {item['title']}")
-                        else:
-                            # Insert new
-                            doc = SOPDocument(
-                                title=item["title"],
-                                content=item["content"],
-                                category=item.get("category"),
-                                tags=item.get("tags", []),
-                                metadata_={"source": "sop_samples.json",
-                                           "original_id": original_id},
-                                is_published=True,
-                                embedding=embedding,
-                            )
-                            session.add(doc)
-                            logger.info(f"Inserted SOP: {item['title']}")
-
-                    await session.commit()
-                    logger.info(
-                        f"Sync completed: {len(samples)} SOPs processed.")
-
-            try:
-                # Use thread-local event loop and session to avoid cross-loop issues
-                # This is the safest approach for background threads
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    loop.run_until_complete(do_sync())
-                finally:
-                    loop.close()
-            except Exception as e:
-                logger.warning(f"Failed to sync SOP data: {e}")
-                # Reset hash so next iteration will retry
-                self._last_file_hash = None
-
-        def watch_loop():
-            """Watch loop that checks file every 5 seconds."""
-            # Initial sync on startup
-            time.sleep(5)  # Wait for model to load
-            sync_file_to_db()
-
-            while True:
-                time.sleep(5)  # Check every 5 seconds
-                try:
-                    sync_file_to_db()
-                except Exception as e:
-                    logger.warning(f"File watcher error: {e}")
-
-        # Run watcher in background thread
-        thread = threading.Thread(target=watch_loop, daemon=True)
-        thread.start()
-        logger.info("File watcher started for sop_samples.json")
 
     def handle_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -456,6 +330,7 @@ class ChatbotModule(IAppModule):
         Exposes:
         - Embedding model status
         - Rate limiter statistics
+        - Ragic sync status
         """
         from modules.chatbot.core.rate_limiter import magic_link_limiter
         from modules.chatbot.services.vector_service import get_vector_service
@@ -491,6 +366,22 @@ class ChatbotModule(IAppModule):
         if hasattr(self, "_stats"):
             details["SOP Documents"] = str(self._stats.get("sop_count", 0))
             details["LINE Users"] = str(self._stats.get("user_count", 0))
+        
+        # 4. Ragic Sync Status (from core SyncManager)
+        try:
+            sync_manager = get_sync_manager()
+            sync_info = sync_manager.get_service_info("chatbot_sop")
+            if sync_info:
+                details["Ragic Sync"] = sync_info.status.capitalize()
+                if sync_info.last_sync_result:
+                    details["SOPs Synced"] = str(sync_info.last_sync_result.synced)
+                    if sync_info.last_sync_result.errors > 0:
+                        details["Sync Errors"] = str(sync_info.last_sync_result.errors)
+                if sync_info.last_sync_time:
+                    details["Last Sync"] = sync_info.last_sync_time.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception as e:
+            details["Ragic Sync"] = "Error"
+            logger.warning(f"Error getting sync status: {e}")
 
         return {
             "status": status,

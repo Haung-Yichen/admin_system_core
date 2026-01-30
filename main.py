@@ -62,6 +62,7 @@ def create_fastapi_app(context: AppContext, registry: ModuleRegistry) -> FastAPI
     from api.admin_auth import router as admin_auth_router
     from api.status_api import init_status_api
     from api.system import router as system_router, set_app_context, set_registry
+    from api.webhooks import router as webhooks_router
     from core.api.auth import router as auth_router
 
     # Create FastAPIServer instance for webhook handling
@@ -93,6 +94,9 @@ def create_fastapi_app(context: AppContext, registry: ModuleRegistry) -> FastAPI
 
     # Register system router (protected by admin auth)
     app.include_router(system_router, prefix="/api")
+
+    # Register unified webhooks router (Ragic, etc.)
+    app.include_router(webhooks_router, prefix="/api")
 
     # Add status API
     status_router = init_status_api(context, registry)
@@ -132,6 +136,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
         raise
+
+    # Start background sync for all registered Ragic services
+    from core.ragic import get_sync_manager
+    sync_manager = get_sync_manager()
+    sync_manager.start_background_sync()
+    logger.info("Ragic sync manager started")
 
     # Update server status
     context = _context
