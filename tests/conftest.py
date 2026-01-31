@@ -54,6 +54,10 @@ def mock_env_vars(monkeypatch):
 def config_loader(mock_env_vars):
     """Create a ConfigLoader instance with mock environment."""
     from core.app_context import ConfigLoader
+    from core.providers import ProviderRegistry
+    
+    # Reset providers to ensure fresh config
+    ProviderRegistry.reset()
     
     loader = ConfigLoader()
     loader.load()
@@ -64,6 +68,11 @@ def config_loader(mock_env_vars):
 def app_context(mock_env_vars):
     """Create an AppContext instance with mock environment."""
     from core.app_context import AppContext
+    from core.providers import ProviderRegistry
+    
+    # Reset singletons for clean test state
+    AppContext.reset()
+    ProviderRegistry.reset()
     
     return AppContext()
 

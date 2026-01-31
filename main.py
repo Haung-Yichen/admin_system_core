@@ -2,7 +2,6 @@
 Admin System Core - Entry Point.
 
 Headless ASGI application for uvicorn execution.
-Removed PyQt GUI dependencies.
 
 Usage:
     uvicorn main:app --host 0.0.0.0 --port 8000 --reload
@@ -11,7 +10,6 @@ Or run directly:
     python main.py
 """
 
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,7 +17,6 @@ from typing import AsyncGenerator
 
 import uvicorn
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from core.app_context import AppContext
@@ -27,7 +24,7 @@ from core.database import close_db_connections, init_database
 from core.logging_config import setup_logging
 from core.registry import ModuleLoader, ModuleRegistry
 from core.router import EventRouter, WebhookDispatcher
-from core.server import FastAPIServer
+from core.server import create_base_app, set_registry, set_webhook_handler
 
 # Module directory path
 MODULES_DIR = "modules"
@@ -61,15 +58,15 @@ def create_fastapi_app(context: AppContext, registry: ModuleRegistry) -> FastAPI
     """Create the FastAPI application with all routers configured."""
     from api.admin_auth import router as admin_auth_router
     from api.status_api import init_status_api
-    from api.system import router as system_router, set_app_context, set_registry
+    from api.system import router as system_router
+    from api.system import set_app_context as set_system_context
+    from api.system import set_registry as set_system_registry
     from api.webhooks import router as webhooks_router
-    from core.api.auth import router as auth_router
 
-    # Create FastAPIServer instance for webhook handling
-    port = context.config.get("server.port", 8000)
-    server = FastAPIServer(context, port=port, registry=registry)
+    # Create base FastAPI app with webhook routes
+    app = create_base_app(context, registry)
 
-    # Create router and dispatcher for webhook handling
+    # Configure webhook handler for legacy endpoint
     router = EventRouter(registry, context)
     webhook_dispatcher = WebhookDispatcher(router, context)
 
@@ -77,17 +74,14 @@ def create_fastapi_app(context: AppContext, registry: ModuleRegistry) -> FastAPI
         """Handle incoming webhook events."""
         if "events" in payload:  # LINE webhook
             return webhook_dispatcher.dispatch_line_webhook(payload)
-        else:
-            return router.route(payload)
+        return router.route(payload)
 
-    server.set_webhook_handler(handle_webhook)
-
-    # Get the FastAPI app from server
-    app = server.app
+    set_webhook_handler(app, handle_webhook)
+    set_registry(app, registry)
 
     # Set shared context and registry for system API
-    set_app_context(context)
-    set_registry(registry)
+    set_system_context(context)
+    set_system_registry(registry)
 
     # Register admin auth router
     app.include_router(admin_auth_router, prefix="/api")
@@ -142,6 +136,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     sync_manager = get_sync_manager()
     sync_manager.start_background_sync()
     logger.info("Ragic sync manager started")
+
+    # Call async_startup on all modules (event loop is now running)
+    if _registry:
+        await _registry.async_startup_all()
+        logger.info("Module async startup completed")
 
     # Update server status
     context = _context

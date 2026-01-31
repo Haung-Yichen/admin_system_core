@@ -1,18 +1,49 @@
 """
 Module Registry - Dynamic module registration and management.
+
 Implements Open/Closed Principle (OCP) for extensibility.
+Now integrates with the DI provider system for cleaner dependency management.
+
+Key Principles:
+- OCP: New modules can be added without modifying the registry
+- DIP: Registry depends on abstractions (IAppModule), not concrete modules
+- SRP: Registry only handles module lifecycle, not business logic
 """
-from typing import Dict, List, Optional, Type
+
+from typing import Any, Callable, Dict, List, Optional, Type
+import inspect
 import logging
 
-from core.interface import IAppModule
-from core.app_context import AppContext
+from core.interface import IAppModule, IModuleContext, ModuleContext
+from core.providers import (
+    ConfigurationProvider,
+    LogService,
+    get_configuration_provider,
+    get_log_service,
+    get_provider_registry,
+)
+
+# TYPE_CHECKING import to avoid circular imports
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from core.app_context import AppContext
 
 
 class ModuleRegistry:
     """
     Registry for managing application modules.
+    
     Allows dynamic registration and lookup of modules.
+    Supports both legacy AppContext injection and modern DI patterns.
+    
+    Usage (legacy):
+        registry = ModuleRegistry()
+        registry.set_context(app_context)
+        registry.register(MyModule())
+        
+    Usage (modern DI):
+        registry = ModuleRegistry()
+        registry.register_with_di(MyModule)  # Dependencies auto-resolved
     """
     
     _instance: Optional["ModuleRegistry"] = None
@@ -30,16 +61,40 @@ class ModuleRegistry:
         
         self._modules: Dict[str, IAppModule] = {}
         self._logger = logging.getLogger(__name__)
-        self._context: Optional[AppContext] = None
+        self._context: Optional["AppContext"] = None
+        self._module_context: Optional[IModuleContext] = None
         self._initialized = True
     
-    def set_context(self, context: AppContext) -> None:
-        """Set the application context for module initialization."""
+    def set_context(self, context: "AppContext") -> None:
+        """
+        Set the application context for module initialization.
+        
+        This also creates a lightweight ModuleContext for DI-aware modules.
+        """
         self._context = context
+        # Create lightweight context from providers
+        self._module_context = ModuleContext(
+            config=get_configuration_provider(),
+            log_service=get_log_service(),
+        )
+    
+    def get_module_context(self) -> IModuleContext:
+        """
+        Get the lightweight module context for DI.
+        
+        Returns:
+            IModuleContext: The module context
+        """
+        if self._module_context is None:
+            self._module_context = ModuleContext(
+                config=get_configuration_provider(),
+                log_service=get_log_service(),
+            )
+        return self._module_context
     
     def register(self, module: IAppModule) -> bool:
         """
-        Register a module with the registry.
+        Register a module with the registry (legacy method).
         
         Args:
             module: The module instance to register
@@ -71,6 +126,9 @@ class ModuleRegistry:
         """
         Register a module by its class (instantiates automatically).
         
+        Attempts DI-style constructor injection if the class accepts
+        typed dependencies. Falls back to no-arg construction.
+        
         Args:
             module_class: The module class to instantiate and register
             
@@ -78,10 +136,96 @@ class ModuleRegistry:
             bool: True if registration successful, False otherwise
         """
         try:
-            module_instance = module_class()
+            module_instance = self._create_instance_with_di(module_class)
             return self.register(module_instance)
         except Exception as e:
             self._logger.error(f"Failed to instantiate module class: {e}")
+            return False
+    
+    def _create_instance_with_di(self, module_class: Type[IAppModule]) -> IAppModule:
+        """
+        Create a module instance, injecting dependencies if possible.
+        
+        Inspects __init__ signature and provides matching providers.
+        
+        Args:
+            module_class: The module class to instantiate
+            
+        Returns:
+            IAppModule: The instantiated module
+        """
+        # Check if __init__ has typed parameters we can inject
+        sig = inspect.signature(module_class.__init__)
+        params = sig.parameters
+        
+        # Skip 'self' parameter
+        injectable_params = {
+            name: param for name, param in params.items() 
+            if name != 'self'
+        }
+        
+        if not injectable_params:
+            # No parameters - simple instantiation
+            return module_class()
+        
+        # Attempt to resolve dependencies
+        kwargs = {}
+        provider_registry = get_provider_registry()
+        
+        for name, param in injectable_params.items():
+            annotation = param.annotation
+            
+            # Skip parameters without annotations or with defaults
+            if annotation is inspect.Parameter.empty:
+                continue
+            
+            # Try to resolve based on type annotation
+            try:
+                if annotation is ConfigurationProvider or annotation.__name__ == 'ConfigurationProvider':
+                    kwargs[name] = provider_registry.get("config")
+                elif annotation is LogService or annotation.__name__ == 'LogService':
+                    kwargs[name] = provider_registry.get("log")
+                # Add more type mappings as needed
+            except (KeyError, AttributeError):
+                pass  # Can't resolve - will use default or fail
+        
+        return module_class(**kwargs)
+    
+    def register_with_di(
+        self,
+        module_class: Type[IAppModule],
+        dependencies: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Register a module with explicit dependency injection.
+        
+        This method allows passing specific dependencies to the module
+        constructor, useful for testing or custom configurations.
+        
+        Args:
+            module_class: The module class to instantiate
+            dependencies: Dict of parameter_name -> value for constructor
+            
+        Returns:
+            bool: True if registration successful
+            
+        Example:
+            registry.register_with_di(
+                MyModule,
+                dependencies={
+                    "config": custom_config,
+                    "log": custom_logger,
+                }
+            )
+        """
+        try:
+            if dependencies:
+                module_instance = module_class(**dependencies)
+            else:
+                module_instance = self._create_instance_with_di(module_class)
+            return self.register(module_instance)
+        except Exception as e:
+            self._logger.error(f"Failed to register module with DI: {e}")
             return False
     
     def unregister(self, module_name: str) -> bool:
@@ -140,11 +284,72 @@ class ModuleRegistry:
                 self._logger.error(f"Error getting menu config from module: {e}")
         return configs
     
+    async def async_startup_all(self) -> None:
+        """
+        Call async_startup() on all registered modules.
+        
+        This should be called during the FastAPI lifespan startup
+        when the async event loop is running.
+        """
+        for module_name, module in self._modules.items():
+            if hasattr(module, 'async_startup'):
+                try:
+                    await module.async_startup()
+                    self._logger.info(f"Module '{module_name}' async startup completed.")
+                except Exception as e:
+                    self._logger.error(f"Module '{module_name}' async startup failed: {e}")
+
     def shutdown_all(self) -> None:
         """Shutdown all registered modules."""
         for module_name in list(self._modules.keys()):
             self.unregister(module_name)
         self._logger.info("All modules shut down.")
+    
+    # -------------------------------------------------------------------------
+    # Testing Utilities
+    # -------------------------------------------------------------------------
+    
+    @classmethod
+    def reset(cls) -> None:
+        """
+        Reset the singleton instance (for testing only).
+        
+        This clears all registered modules and allows a fresh start.
+        """
+        if cls._instance is not None:
+            cls._instance._modules.clear()
+            cls._instance._context = None
+            cls._instance._module_context = None
+        cls._instance = None
+    
+    @classmethod
+    def create_test_registry(
+        cls,
+        modules: Optional[List[IAppModule]] = None,
+    ) -> "ModuleRegistry":
+        """
+        Create a test registry with optional pre-registered modules.
+        
+        Args:
+            modules: Optional list of modules to register
+            
+        Returns:
+            A fresh ModuleRegistry for testing
+        """
+        cls.reset()
+        registry = cls()
+        
+        # Set up a minimal context
+        registry._module_context = ModuleContext(
+            config=get_configuration_provider(),
+            log_service=get_log_service(),
+        )
+        
+        if modules:
+            for module in modules:
+                registry.register(module)
+        
+        return registry
 
 
 class ModuleLoader:

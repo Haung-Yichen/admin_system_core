@@ -24,7 +24,7 @@ from sqlalchemy import inspect, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.database import Base, get_thread_local_engine, get_thread_local_session
+from core.database import Base, get_engine, get_standalone_session
 from core.ragic import RagicService
 from modules.administrative.core.config import (
     AdminSettings,
@@ -575,7 +575,7 @@ class RagicSyncService:
             - AdministrativeAccount table (accounts cache)
             - LeaveType table (leave types cache)
         """
-        engine = get_thread_local_engine()
+        engine = get_engine()
         
         # Define all tables that need to exist
         required_tables = {
@@ -831,7 +831,7 @@ class RagicSyncService:
             await self._ensure_tables_exist()
 
             # Fetch and sync data
-            async with get_thread_local_session() as session:
+            async with get_standalone_session() as session:
                 leave_type_records = await self._fetch_form_data(
                     self._settings.ragic_url_leave_type
                 )
@@ -898,7 +898,7 @@ class RagicSyncService:
             await self._ensure_tables_exist()
 
             # Step 3: Fetch and sync account data
-            async with get_thread_local_session() as session:
+            async with get_standalone_session() as session:
                 account_records = await self._fetch_form_data(
                     self._settings.ragic_url_account
                 )

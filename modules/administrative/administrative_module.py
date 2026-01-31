@@ -8,7 +8,6 @@ Handles Leave Request System and data synchronization from Ragic.
 import asyncio
 import logging
 import re
-import threading
 from typing import Any, Optional, TYPE_CHECKING
 
 from fastapi import APIRouter
@@ -56,6 +55,8 @@ class AdministrativeModule(IAppModule):
             "last_error": None,
         }
         self._settings = get_admin_settings()
+        # Store background task references to prevent garbage collection
+        self._background_tasks: list[asyncio.Task[Any]] = []
 
     def get_module_name(self) -> str:
         """Return module identifier."""
@@ -94,11 +95,8 @@ class AdministrativeModule(IAppModule):
         except Exception as e:
             logger.error(f"Failed to register AccountSyncService: {e}")
 
-        # Trigger async data sync in background
-        self._start_ragic_sync()
-        
-        # Setup and activate LINE Rich Menu in background
-        self._start_rich_menu_setup()
+        # Note: Async tasks (Ragic sync, Rich Menu setup) are deferred to async_startup()
+        # because no event loop is running during on_entry()
 
         context.log_event(
             "Administrative module loaded with Leave Request System",
@@ -106,30 +104,40 @@ class AdministrativeModule(IAppModule):
         )
         logger.info("Administrative module initialized")
 
+    async def async_startup(self) -> None:
+        """
+        Perform async initialization when the event loop is running.
+        
+        Called by the framework during FastAPI lifespan startup.
+        """
+        logger.info("Administrative module async startup...")
+        
+        # Trigger async data sync in background
+        self._start_ragic_sync()
+        
+        # Setup and activate LINE Rich Menu in background
+        self._start_rich_menu_setup()
+        
+        logger.info("Administrative module async startup completed")
+
     def _start_ragic_sync(self) -> None:
         """
-        Start Ragic data sync in background thread.
+        Start Ragic data sync as a background async task.
 
-        Uses a separate thread with its own event loop to avoid
-        blocking the main application startup.
+        Uses asyncio.create_task to run the sync operation concurrently
+        without blocking the main application startup.
         """
-        def sync_worker():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
+        async def sync_worker() -> None:
+            """Async worker for Ragic data synchronization."""
             try:
                 logger.info("Starting Ragic data sync...")
                 self._sync_status["status"] = "syncing"
 
-                result = loop.run_until_complete(
-                    self._sync_service.sync_all_data()
-                )
+                result = await self._sync_service.sync_all_data()
 
                 self._sync_status["status"] = "completed"
-                self._sync_status["accounts"] = result.get(
-                    "accounts_synced", 0)
-                self._sync_status["skipped"] = result.get(
-                    "accounts_skipped", 0)
+                self._sync_status["accounts"] = result.get("accounts_synced", 0)
+                self._sync_status["skipped"] = result.get("accounts_skipped", 0)
 
                 logger.info(
                     f"Ragic sync completed: "
@@ -137,109 +145,98 @@ class AdministrativeModule(IAppModule):
                     f"{self._sync_status['skipped']} skipped"
                 )
 
+            except asyncio.CancelledError:
+                logger.info("Ragic sync task was cancelled")
+                self._sync_status["status"] = "cancelled"
+                raise
+
             except Exception as e:
-                logger.error(f"Ragic sync failed: {e}")
+                logger.exception(f"Ragic sync failed: {e}")
                 self._sync_status["status"] = "error"
                 self._sync_status["last_error"] = str(e)
 
-            finally:
-                # Cleanup thread-local database engine
-                from core.database import dispose_thread_local_engine
-                try:
-                    loop.run_until_complete(dispose_thread_local_engine())
-                except Exception as e:
-                    logger.warning(f"Error disposing thread local engine: {e}")
+        def handle_task_exception(task: asyncio.Task[Any]) -> None:
+            """Callback to handle task exceptions without crashing the app."""
+            if task.cancelled():
+                return
+            exc = task.exception()
+            if exc is not None:
+                logger.error(
+                    f"Background Ragic sync task failed with exception: {exc}",
+                    exc_info=exc,
+                )
 
-                # Close the sync service's HTTP client
-                try:
-                    loop.run_until_complete(self._sync_service.close())
-                except Exception as e:
-                    logger.warning(f"Error closing sync service: {e}")
-
-                # Windows-specific: Cancel all pending tasks and allow transports to close
-                try:
-                    pending = asyncio.all_tasks(loop)
-                    for task in pending:
-                        task.cancel()
-                    # Give cancelled tasks time to clean up
-                    if pending:
-                        loop.run_until_complete(asyncio.gather(
-                            *pending, return_exceptions=True))
-                except Exception:
-                    pass
-
-                # Allow SSL transports to close gracefully
-                try:
-                    loop.run_until_complete(asyncio.sleep(0.250))
-                except Exception:
-                    pass
-
-                loop.close()
-
-        # Run sync in background thread
-        sync_thread = threading.Thread(target=sync_worker, daemon=True)
-        sync_thread.start()
-        logger.info("Ragic sync started in background")
+        # Create and schedule the background task
+        try:
+            loop = asyncio.get_running_loop()
+            task = loop.create_task(sync_worker(), name="ragic_sync")
+            task.add_done_callback(handle_task_exception)
+            self._background_tasks.append(task)
+            logger.info("Ragic sync started in background")
+        except RuntimeError:
+            # No running event loop - this shouldn't happen in normal operation
+            logger.error("Cannot start Ragic sync: no running event loop")
+            self._sync_status["status"] = "error"
+            self._sync_status["last_error"] = "No running event loop"
 
     def _start_rich_menu_setup(self) -> None:
         """
-        在背景執行緒中設定並啟用 LINE Rich Menu。
-        
-        流程：
-            1. 刪除所有現有選單
-            2. 建立新選單
-            3. 上傳選單圖片
-            4. 設為預設選單
+        Start LINE Rich Menu setup as a background async task.
+
+        Flow:
+            1. Delete all existing menus
+            2. Create new menu
+            3. Upload menu image
+            4. Set as default menu
         """
-        def setup_worker():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
+        async def setup_worker() -> None:
+            """Async worker for Rich Menu setup."""
             rich_menu_service = RichMenuService()
-            
+
             try:
                 logger.info("Starting Rich Menu setup...")
-                success = loop.run_until_complete(
-                    rich_menu_service.setup_and_activate_menu()
-                )
-                
+                success = await rich_menu_service.setup_and_activate_menu()
+
                 if success:
                     logger.info("Rich Menu setup completed successfully")
                 else:
                     logger.warning("Rich Menu setup failed")
-                    
+
+            except asyncio.CancelledError:
+                logger.info("Rich Menu setup task was cancelled")
+                raise
+
             except Exception as e:
-                logger.error(f"Rich Menu setup error: {e}")
-                
+                logger.exception(f"Rich Menu setup error: {e}")
+
             finally:
                 # Close HTTP client
                 try:
-                    loop.run_until_complete(rich_menu_service.close())
+                    await rich_menu_service.close()
                 except Exception as e:
                     logger.warning(f"Error closing rich menu service: {e}")
-                
-                # Windows-specific cleanup
-                try:
-                    pending = asyncio.all_tasks(loop)
-                    for task in pending:
-                        task.cancel()
-                    if pending:
-                        loop.run_until_complete(asyncio.gather(
-                            *pending, return_exceptions=True))
-                except Exception:
-                    pass
-                
-                try:
-                    loop.run_until_complete(asyncio.sleep(0.250))
-                except Exception:
-                    pass
-                
-                loop.close()
-        
-        # Run in background thread
-        menu_thread = threading.Thread(target=setup_worker, daemon=True)
-        menu_thread.start()
-        logger.info("Rich Menu setup started in background")
+
+        def handle_task_exception(task: asyncio.Task[Any]) -> None:
+            """Callback to handle task exceptions without crashing the app."""
+            if task.cancelled():
+                return
+            exc = task.exception()
+            if exc is not None:
+                logger.error(
+                    f"Background Rich Menu setup task failed with exception: {exc}",
+                    exc_info=exc,
+                )
+
+        # Create and schedule the background task
+        try:
+            loop = asyncio.get_running_loop()
+            task = loop.create_task(setup_worker(), name="rich_menu_setup")
+            task.add_done_callback(handle_task_exception)
+            self._background_tasks.append(task)
+            logger.info("Rich Menu setup started in background")
+        except RuntimeError:
+            # No running event loop - this shouldn't happen in normal operation
+            logger.error("Cannot start Rich Menu setup: no running event loop")
 
     def handle_event(self, context: "AppContext", event: dict) -> Optional[dict]:
         """
@@ -456,8 +453,14 @@ class AdministrativeModule(IAppModule):
     def on_shutdown(self) -> None:
         """Cleanup when module is shutting down."""
         logger.info("Administrative module shutting down")
-        # Sync service runs in a daemon thread, so we don't need to explicitly close it
-        # trying to close it here (main thread) can cause Event Loop Closed errors
+
+        # Cancel any running background tasks
+        for task in self._background_tasks:
+            if not task.done():
+                task.cancel()
+                logger.debug(f"Cancelled background task: {task.get_name()}")
+
+        self._background_tasks.clear()
 
 
 # Module factory function for dynamic loading

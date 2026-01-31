@@ -1,175 +1,321 @@
 """
-AppContext - Dependency Injection Container.
-Implements the Dependency Inversion Principle (DIP).
-"""
-from typing import Any, Dict, Optional, TYPE_CHECKING
-from dataclasses import dataclass, field
-from pathlib import Path
-import os
-import logging
+AppContext - Dependency Injection Container (Refactored).
 
-from dotenv import load_dotenv
+This module now delegates to specific providers while maintaining
+backward compatibility with existing code.
+
+Implements:
+- Dependency Inversion Principle (DIP)
+- Interface Segregation Principle (ISP) via delegation to providers
+- Open/Closed Principle (OCP) via provider registry
+
+Migration Path:
+    OLD: context.config.get("server.port")
+    NEW: from core.dependencies import ConfigDep
+         @router.get("/") 
+         def handler(config: ConfigDep): ...
+         
+    OLD: context.log_event("message")
+    NEW: from core.dependencies import LogDep
+         @router.get("/")
+         def handler(log: LogDep): 
+             log.log_event("message")
+"""
+
+from typing import Any, Optional, Protocol, TYPE_CHECKING
+import logging
+import warnings
+
+from core.providers import (
+    ConfigurationProvider,
+    LogService,
+    ServerState,
+    get_configuration_provider,
+    get_log_service,
+    get_line_client,
+    get_ragic_service,
+    get_server_state,
+    get_provider_registry,
+)
 
 if TYPE_CHECKING:
     from services.line_client import LineClient
     from core.ragic import RagicService
 
 
-@dataclass
-class ConfigLoader:
-    """Configuration loader from environment variables."""
-    
-    _config: Dict[str, Any] = field(default_factory=dict)
-    
-    def load(self, env_path: Optional[str] = None) -> None:
-        """Load configuration from .env file."""
-        if env_path:
-            load_dotenv(env_path)
-        else:
-            # Try to find .env in project root
-            project_root = Path(__file__).parent.parent
-            env_file = project_root / ".env"
-            if env_file.exists():
-                load_dotenv(env_file)
-        
-        self._config = {
-            "server": {
-                "host": os.getenv("SERVER_HOST", "127.0.0.1"),
-                "port": int(os.getenv("SERVER_PORT", "8000")),
-                "base_url": os.getenv("BASE_URL", "")
-            },
-            "app": {
-                "debug": os.getenv("APP_DEBUG", "true").lower() == "true",
-                "log_level": os.getenv("APP_LOG_LEVEL", "INFO")
-            },
-            "database": {
-                "url": os.getenv("DATABASE_URL", "")
-            },
-            "security": {
-                "key": os.getenv("SECURITY_KEY", ""),
-                "jwt_secret_key": os.getenv("JWT_SECRET_KEY", ""),
-                "jwt_algorithm": os.getenv("JWT_ALGORITHM", "HS256"),
-                "magic_link_expire_minutes": int(os.getenv("MAGIC_LINK_EXPIRE_MINUTES", "15"))
-            },
-            "email": {
-                "host": os.getenv("SMTP_HOST", ""),
-                "port": int(os.getenv("SMTP_PORT", "587")),
-                "username": os.getenv("SMTP_USERNAME", ""),
-                "password": os.getenv("SMTP_PASSWORD", ""),
-                "from_email": os.getenv("SMTP_FROM_EMAIL", ""),
-                "from_name": os.getenv("SMTP_FROM_NAME", "Admin System")
-            },
-            "vector": {
-                "model_name": os.getenv("EMBEDDING_MODEL_NAME", "paraphrase-multilingual-MiniLM-L12-v2"),
-                "dimension": int(os.getenv("EMBEDDING_DIMENSION", "384")),
-                "top_k": int(os.getenv("SEARCH_TOP_K", "3")),
-                "similarity_threshold": float(os.getenv("SEARCH_SIMILARITY_THRESHOLD", "0.3"))
-            },
-            "line": {
-                "channel_id": os.getenv("LINE_CHANNEL_ID", ""),
-                "channel_secret": os.getenv("LINE_CHANNEL_SECRET", ""),
-                "channel_access_token": os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
-            },
-            "ragic": {
-                "api_key": os.getenv("RAGIC_API_KEY", ""),
-                "base_url": os.getenv("RAGIC_BASE_URL", "https://ap13.ragic.com"),
-                "employee_sheet_path": os.getenv("RAGIC_EMPLOYEE_SHEET_PATH", "/HSIBAdmSys/ychn-test/11"),
-                "field_email": os.getenv("RAGIC_FIELD_EMAIL", "1005977"),
-                "field_name": os.getenv("RAGIC_FIELD_NAME", "1005975"),
-                "field_door_access_id": os.getenv("RAGIC_FIELD_DOOR_ACCESS_ID", "1005983")
-            }
-        }
-    
-    def get(self, key: str, default: Any = None) -> Any:
-        """Get configuration value by dot notation key."""
-        keys = key.split('.')
-        value = self._config
-        for k in keys:
-            if isinstance(value, dict) and k in value:
-                value = value[k]
-            else:
-                return default
-        return value
-    
-    def is_line_configured(self) -> bool:
-        """Check if LINE credentials are set."""
-        return bool(
-            self.get("line.channel_secret") and 
-            self.get("line.channel_access_token")
-        )
-    
-    def is_ragic_configured(self) -> bool:
-        """Check if Ragic credentials are set."""
-        return bool(
-            self.get("ragic.api_key") and 
-            self.get("ragic.base_url")
-        )
+# =============================================================================
+# Backward Compatibility Alias
+# =============================================================================
 
+# ConfigLoader is now an alias for ConfigurationProvider
+# This maintains backward compatibility with existing imports
+ConfigLoader = ConfigurationProvider
+
+
+# =============================================================================
+# Module Context Protocol (for type hints)
+# =============================================================================
+
+class IModuleContext(Protocol):
+    """
+    Protocol defining the minimal interface modules need from context.
+    
+    Modules should depend on this protocol, not the concrete AppContext.
+    This enables easier testing and follows the Interface Segregation Principle.
+    """
+    
+    @property
+    def config(self) -> ConfigurationProvider:
+        """Access configuration."""
+        ...
+    
+    def log_event(self, message: str, level: str = "INFO") -> None:
+        """Log an event."""
+        ...
+    
+    def get_event_log(self) -> list[str]:
+        """Get event history."""
+        ...
+
+
+# =============================================================================
+# AppContext - Facade over DI Providers
+# =============================================================================
 
 class AppContext:
     """
-    Application Context - Central Dependency Injection Container.
+    Application Context - Facade over DI providers.
+    
+    This class now acts as a facade that delegates to specific providers,
+    maintaining backward compatibility while internally using proper DI.
+    
+    For new code, prefer injecting specific providers directly:
+        - ConfigDep for configuration
+        - LogDep for logging
+        - DbSessionDep for database sessions
+        
+    Example (new style):
+        from core.dependencies import ConfigDep, LogDep
+        
+        @router.get("/items")
+        async def get_items(config: ConfigDep, log: LogDep):
+            port = config.get("server.port")
+            log.log_event("Fetching items")
+            ...
     """
     
+    _instance: Optional["AppContext"] = None
+    
+    def __new__(cls) -> "AppContext":
+        """
+        Singleton pattern to ensure consistent state across the application.
+        
+        Note: For testing, use AppContext.reset() to clear the singleton.
+        """
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+    
     def __init__(self) -> None:
+        """Initialize the AppContext with DI providers."""
+        if self._initialized:
+            return
+            
         self._logger = logging.getLogger(__name__)
-        self._config_loader = ConfigLoader()
-        self._config_loader.load()
         
-        # Service instances (lazy initialization)
-        self._line_client: Optional["LineClient"] = None
-        self._ragic_service: Optional["RagicService"] = None
+        # Delegate to DI providers instead of owning state
+        self._config_provider = get_configuration_provider()
+        self._log_service = get_log_service()
+        self._server_state = get_server_state()
         
-        # Event log for GUI display
-        self._event_log: list[str] = []
-        self._max_log_entries: int = 500
+        # Set initial server port from config
+        port = self._config_provider.get("server.port", 8000)
+        self._server_state.port = port
         
-        # Runtime state
-        self._server_running: bool = False
-        self._server_port: int = self._config_loader.get("server.port", 8000)
+        self._initialized = True
+    
+    # -------------------------------------------------------------------------
+    # Configuration Access (delegates to ConfigurationProvider)
+    # -------------------------------------------------------------------------
     
     @property
-    def config(self) -> ConfigLoader:
-        """Access the configuration loader."""
-        return self._config_loader
+    def config(self) -> ConfigurationProvider:
+        """
+        Access the configuration provider.
+        
+        Returns:
+            ConfigurationProvider: The configuration provider instance
+            
+        Note:
+            For FastAPI routes, prefer using ConfigDep:
+                from core.dependencies import ConfigDep
+                async def handler(config: ConfigDep): ...
+        """
+        return self._config_provider
+    
+    # -------------------------------------------------------------------------
+    # LINE Client Access (delegates to provider)
+    # -------------------------------------------------------------------------
     
     @property
     def line_client(self) -> "LineClient":
-        """Lazy initialization of LINE client."""
-        if self._line_client is None:
-            from services.line_client import LineClient
-            self._line_client = LineClient(self._config_loader)
-        return self._line_client
+        """
+        Access the LINE client (lazy initialization via provider).
+        
+        Returns:
+            LineClient: The LINE API client
+            
+        Note:
+            For FastAPI routes, prefer using LineClientDep:
+                from core.dependencies import LineClientDep
+                async def handler(line: LineClientDep): ...
+        """
+        return get_line_client()
+    
+    # -------------------------------------------------------------------------
+    # Ragic Service Access (delegates to provider)
+    # -------------------------------------------------------------------------
     
     @property
     def ragic_service(self) -> "RagicService":
-        """Lazy initialization of Ragic service."""
-        if self._ragic_service is None:
-            from core.ragic import RagicService
-            self._ragic_service = RagicService()
-        return self._ragic_service
+        """
+        Access the Ragic service (lazy initialization via provider).
+        
+        Returns:
+            RagicService: The Ragic API service
+            
+        Note:
+            For FastAPI routes, prefer using RagicServiceDep:
+                from core.dependencies import RagicServiceDep
+                async def handler(ragic: RagicServiceDep): ...
+        """
+        return get_ragic_service()
+    
+    # -------------------------------------------------------------------------
+    # Logging (delegates to LogService)
+    # -------------------------------------------------------------------------
     
     def log_event(self, message: str, level: str = "INFO") -> None:
-        """Log an event to both logger and event log."""
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        formatted = f"[{timestamp}] [{level}] {message}"
+        """
+        Log an event to both logger and event log.
         
-        self._event_log.append(formatted)
-        if len(self._event_log) > self._max_log_entries:
-            self._event_log = self._event_log[-self._max_log_entries:]
-        
-        self._logger.info(message)
+        Args:
+            message: The message to log
+            level: Log level (INFO, ERROR, SUCCESS, WARN, etc.)
+            
+        Note:
+            For FastAPI routes, prefer using LogDep:
+                from core.dependencies import LogDep
+                async def handler(log: LogDep):
+                    log.log_event("message")
+        """
+        self._log_service.log_event(message, level)
     
     def get_event_log(self) -> list[str]:
-        """Get the current event log."""
-        return self._event_log.copy()
+        """
+        Get a copy of the event log.
+        
+        Returns:
+            List of formatted log entries
+        """
+        return self._log_service.get_event_log()
+    
+    # -------------------------------------------------------------------------
+    # Server State (delegates to ServerState)
+    # -------------------------------------------------------------------------
     
     def set_server_status(self, running: bool, port: int = 8000) -> None:
-        """Update server status."""
-        self._server_running = running
-        self._server_port = port
+        """
+        Update server status.
+        
+        Args:
+            running: Whether the server is running
+            port: The server port
+        """
+        self._server_state.set_status(running, port)
     
     def get_server_status(self) -> tuple[bool, int]:
-        """Get current server status."""
-        return (self._server_running, self._server_port)
+        """
+        Get current server status.
+        
+        Returns:
+            Tuple of (is_running, port)
+        """
+        return self._server_state.get_status()
+    
+    # -------------------------------------------------------------------------
+    # Direct Provider Access (for explicit DI)
+    # -------------------------------------------------------------------------
+    
+    def get_config_provider(self) -> ConfigurationProvider:
+        """Get the configuration provider directly."""
+        return self._config_provider
+    
+    def get_log_service(self) -> LogService:
+        """Get the log service directly."""
+        return self._log_service
+    
+    def get_server_state(self) -> ServerState:
+        """Get the server state directly."""
+        return self._server_state
+    
+    # -------------------------------------------------------------------------
+    # Testing Support
+    # -------------------------------------------------------------------------
+    
+    @classmethod
+    def reset(cls) -> None:
+        """
+        Reset the singleton instance (for testing only).
+        
+        This also resets the underlying providers.
+        """
+        cls._instance = None
+        from core.providers import ProviderRegistry
+        ProviderRegistry.reset()
+    
+    @classmethod
+    def create_test_context(
+        cls,
+        config_overrides: Optional[dict] = None,
+    ) -> "AppContext":
+        """
+        Create a test context with optional config overrides.
+        
+        Args:
+            config_overrides: Optional dict of config values to override
+            
+        Returns:
+            A fresh AppContext for testing
+        """
+        cls.reset()
+        context = cls()
+        
+        if config_overrides:
+            for key, value in config_overrides.items():
+                keys = key.split('.')
+                current = context._config_provider._config
+                for k in keys[:-1]:
+                    if k not in current:
+                        current[k] = {}
+                    current = current[k]
+                current[keys[-1]] = value
+        
+        return context
+
+
+# =============================================================================
+# Factory Function
+# =============================================================================
+
+def get_app_context() -> AppContext:
+    """
+    Get the AppContext singleton.
+    
+    This is the preferred way to obtain the AppContext instance.
+    
+    Returns:
+        AppContext: The application context singleton
+    """
+    return AppContext()
