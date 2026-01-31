@@ -101,7 +101,9 @@ class Customer(Base):
 ```python
 from core.security import generate_blind_index
 
-email_hash = generate_blind_index(email)
+# generate_blind_index 接受原始字串值
+email_hash = generate_blind_index("user@example.com")
+
 result = await db.execute(
     select(Customer).where(Customer.email_hash == email_hash)
 )
@@ -155,11 +157,14 @@ async def check_user_binding(id_token: str):
     auth_service = get_auth_service()
     async with get_thread_local_session() as db:
         # 驗證 ID Token 並檢查綁定狀態
+        # 回傳: {"sub": str, "is_bound": bool, "email": str | None, ...}
         result = await auth_service.check_binding_status(id_token, db)
+        
         if result["is_bound"]:
             print(f"User email: {result['email']}")
         else:
             # 尚未綁定，需引導使用者進行 Magic Link 綁定
+            # result['sub'] 為穩定的 LINE User ID
             print(f"LINE sub {result['sub']} not bound yet")
 ```
 

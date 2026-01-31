@@ -154,8 +154,18 @@ async def sync_overtime(self):
 
 ## 最佳實踐
 
-### 1. 避免硬編碼 Field ID
-建議將 Field ID 集中管理 (如 `config.py`)，確保 Ragic 欄位變更時只需修改一處。
+### 1. 避免硬編碼 Field ID (Use ragic_columns.json)
+
+Admin System Core 採用 **`ragic_columns.json`** 作為欄位 ID 的 Single Source of Truth。
+建議透過 `core.ragic.columns` 取得欄位設定，而非在程式碼中硬編碼。
+
+```python
+from core.ragic.columns import get_account_form
+
+def get_employee_email_field():
+    form_config = get_account_form()
+    return form_config.field("EMAILS")  # 回傳 "1005977"
+```
 
 ### 2. 資料一致性與唯讀原則
 Sync Pattern 採用 **Eventual Consistency (最終一致性)**。
