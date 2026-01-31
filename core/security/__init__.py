@@ -8,6 +8,8 @@ and webhook signature validation.
 from core.security.encryption import (
     EncryptedType,
     EncryptionService,
+    KeyDerivationService,
+    KeyPurpose,
     generate_blind_index,
     get_encryption_service,
 )
@@ -23,6 +25,8 @@ __all__ = [
     # Encryption
     "EncryptedType",
     "EncryptionService",
+    "KeyDerivationService",
+    "KeyPurpose",
     "generate_blind_index",
     "get_encryption_service",
     # Webhook Security
