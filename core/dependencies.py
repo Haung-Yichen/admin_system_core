@@ -17,10 +17,11 @@ Usage:
         ...
 """
 
+import logging
 from collections.abc import AsyncGenerator
-from typing import Annotated, TYPE_CHECKING
+from typing import Annotated, Optional, TYPE_CHECKING
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException, Query, Request, status
 
 from core.providers import (
     ConfigurationProvider,
@@ -32,11 +33,19 @@ from core.providers import (
     get_server_state,
     ServerState,
 )
+from core.security.webhook import (
+    WebhookAuthContext,
+    WebhookAuthResult,
+    WebhookSecurityService,
+    get_webhook_security_service,
+)
 
 if TYPE_CHECKING:
     from services.line_client import LineClient
     from core.ragic import RagicService
     from sqlalchemy.ext.asyncio import AsyncSession
+
+_webhook_logger = logging.getLogger("webhook.security")
 
 
 # =============================================================================
@@ -305,3 +314,189 @@ def get_request_context(
 
 
 RequestContextDep = Annotated[RequestContext, Depends(get_request_context)]
+
+
+# =============================================================================
+# Webhook Security Dependencies
+# =============================================================================
+
+def get_webhook_security() -> WebhookSecurityService:
+    """
+    FastAPI dependency for webhook security service.
+    
+    Returns:
+        WebhookSecurityService: The webhook security service
+    """
+    return get_webhook_security_service()
+
+
+WebhookSecurityDep = Annotated[WebhookSecurityService, Depends(get_webhook_security)]
+
+
+def _get_client_ip(request: Request) -> str:
+    """
+    Extract client IP address from request.
+    
+    Checks X-Forwarded-For header first (for reverse proxy setups),
+    then falls back to direct client IP.
+    
+    Args:
+        request: FastAPI request object
+        
+    Returns:
+        Client IP address string
+    """
+    # Check for forwarded header (common in reverse proxy setups)
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        # X-Forwarded-For can contain multiple IPs; take the first (original client)
+        return forwarded_for.split(",")[0].strip()
+    
+    # Check X-Real-IP header (used by some proxies)
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip.strip()
+    
+    # Fall back to direct client IP
+    if request.client:
+        return request.client.host
+    
+    return "unknown"
+
+
+async def verify_webhook_signature(
+    request: Request,
+    source: str = Query(..., description="Webhook source identifier"),
+    token: Optional[str] = Query(None, description="URL-based authentication token"),
+) -> WebhookAuthContext:
+    """
+    FastAPI dependency that verifies webhook signatures.
+    
+    This dependency reads the raw request body and verifies it against
+    either the X-Hub-Signature-256 header or URL token parameter.
+    
+    Args:
+        request: FastAPI request object
+        source: Webhook source identifier (from query param)
+        token: Optional URL-based token
+        
+    Returns:
+        WebhookAuthContext: Authentication result context
+        
+    Raises:
+        HTTPException: 401 if signature is missing, 403 if invalid
+    """
+    security_service = get_webhook_security_service()
+    client_ip = _get_client_ip(request)
+    
+    # Get raw request body for signature verification
+    body = await request.body()
+    
+    # Get signature header
+    signature_header = request.headers.get("X-Hub-Signature-256")
+    
+    # Authenticate the request
+    auth_context = security_service.authenticate_request(
+        payload=body,
+        signature_header=signature_header,
+        url_token=token,
+        source=source,
+        client_ip=client_ip,
+    )
+    
+    # Handle authentication failures
+    if not auth_context.verified:
+        # Log the failed attempt with details
+        _webhook_logger.warning(
+            f"Webhook authentication failed: "
+            f"source={source}, "
+            f"result={auth_context.result.value}, "
+            f"ip={client_ip}, "
+            f"has_signature_header={bool(signature_header)}, "
+            f"has_url_token={bool(token)}"
+        )
+        
+        # Determine appropriate HTTP status code
+        if auth_context.result == WebhookAuthResult.SECRET_NOT_CONFIGURED:
+            # Server configuration error - 500
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Webhook not properly configured",
+            )
+        elif auth_context.result in (
+            WebhookAuthResult.MISSING_SIGNATURE,
+            WebhookAuthResult.MISSING_TOKEN,
+        ):
+            # Missing credentials - 401 Unauthorized
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing webhook signature or token",
+                headers={"WWW-Authenticate": "X-Hub-Signature-256"},
+            )
+        else:
+            # Invalid credentials - 403 Forbidden
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid webhook signature or token",
+            )
+    
+    return auth_context
+
+
+# Type alias for webhook authentication dependency
+WebhookAuthDep = Annotated[WebhookAuthContext, Depends(verify_webhook_signature)]
+
+
+async def verify_webhook_signature_optional(
+    request: Request,
+    source: str = Query(..., description="Webhook source identifier"),
+    token: Optional[str] = Query(None, description="URL-based authentication token"),
+) -> WebhookAuthContext:
+    """
+    FastAPI dependency that verifies webhook signatures without raising exceptions.
+    
+    Unlike verify_webhook_signature, this returns the auth context even on
+    failure, allowing the handler to decide how to proceed.
+    
+    Useful for gradual migration or endpoints that need custom error handling.
+    
+    Args:
+        request: FastAPI request object
+        source: Webhook source identifier (from query param)
+        token: Optional URL-based token
+        
+    Returns:
+        WebhookAuthContext: Authentication result context (may be unverified)
+    """
+    security_service = get_webhook_security_service()
+    client_ip = _get_client_ip(request)
+    
+    # Get raw request body for signature verification
+    body = await request.body()
+    
+    # Get signature header
+    signature_header = request.headers.get("X-Hub-Signature-256")
+    
+    # Authenticate the request
+    auth_context = security_service.authenticate_request(
+        payload=body,
+        signature_header=signature_header,
+        url_token=token,
+        source=source,
+        client_ip=client_ip,
+    )
+    
+    # Log failed attempts but don't raise
+    if not auth_context.verified:
+        _webhook_logger.warning(
+            f"Webhook authentication failed (non-blocking): "
+            f"source={source}, "
+            f"result={auth_context.result.value}, "
+            f"ip={client_ip}"
+        )
+    
+    return auth_context
+
+
+# Type alias for optional webhook authentication
+WebhookAuthOptionalDep = Annotated[WebhookAuthContext, Depends(verify_webhook_signature_optional)]

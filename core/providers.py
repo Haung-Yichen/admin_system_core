@@ -123,6 +123,15 @@ class ConfigurationProvider:
                 "field_email": os.getenv("RAGIC_FIELD_EMAIL", "1005977"),
                 "field_name": os.getenv("RAGIC_FIELD_NAME", "1005975"),
                 "field_door_access_id": os.getenv("RAGIC_FIELD_DOOR_ACCESS_ID", "1005983")
+            },
+            "webhook": {
+                "default_secret": os.getenv("WEBHOOK_DEFAULT_SECRET", ""),
+                "secrets": {
+                    # Source-specific secrets (e.g., WEBHOOK_SECRET_RAGIC, WEBHOOK_SECRET_CHATBOT_SOP)
+                    "ragic": os.getenv("WEBHOOK_SECRET_RAGIC", ""),
+                    "chatbot_sop": os.getenv("WEBHOOK_SECRET_CHATBOT_SOP", ""),
+                    "chatbot_qa": os.getenv("WEBHOOK_SECRET_CHATBOT_QA", ""),
+                }
             }
         }
         self._loaded = True

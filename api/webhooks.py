@@ -4,19 +4,32 @@ Unified Webhook Router.
 Handles incoming webhooks from external services (Ragic, LINE, etc.)
 and dispatches them to the appropriate module/service.
 
+Security:
+    All webhook endpoints are protected by HMAC-SHA256 signature verification.
+    Requests must include either:
+    - X-Hub-Signature-256 header: sha256=<signature>
+    - URL token parameter: ?token=<secret>
+    
+    Configure secrets via environment variables:
+    - WEBHOOK_DEFAULT_SECRET: Default secret for all webhooks
+    - WEBHOOK_SECRET_RAGIC: Source-specific secret for Ragic
+    - WEBHOOK_SECRET_CHATBOT_SOP: Source-specific secret for chatbot SOP
+
 Endpoints:
-    POST /webhooks/ragic?source={key}  - Ragic form webhooks
-    POST /webhooks/ragic/sync          - Trigger full sync
+    POST /webhooks/ragic?source={key}  - Ragic form webhooks (authenticated)
+    POST /webhooks/ragic/sync          - Trigger full sync (requires auth)
     GET  /webhooks/ragic/status        - Get all sync service statuses
 """
 
 import logging
 from typing import Any, Optional
 
-from fastapi import APIRouter, Form, HTTPException, Query, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Query, Request
 
+from core.dependencies import WebhookAuthDep
 from core.ragic.sync_base import get_sync_manager
+from core.security.webhook import WebhookAuthContext
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +69,7 @@ class SyncTriggerResponse(BaseModel):
 @router.post("/ragic", response_model=WebhookResponse)
 async def ragic_webhook(
     request: Request,
-    source: str = Query(..., description="Sync service key (e.g., 'chatbot_sop')"),
+    auth: WebhookAuthDep,
 ) -> WebhookResponse:
     """
     Handle Ragic webhook notifications.
@@ -64,13 +77,29 @@ async def ragic_webhook(
     Ragic sends webhooks when records are created, updated, or deleted.
     The payload is form-urlencoded with field IDs as keys.
     
+    Security:
+        This endpoint requires HMAC-SHA256 signature verification.
+        Include X-Hub-Signature-256 header or token URL parameter.
+    
     Query Parameters:
-        source: The sync service key to dispatch to.
+        source: The sync service key to dispatch to (e.g., 'chatbot_sop')
+        token: Optional URL-based authentication token
+    
+    Headers:
+        X-Hub-Signature-256: sha256=<hmac-signature>
     
     Expected Form Fields:
         _ragicId: Record ID in Ragic
         action (optional): "create", "update", or "delete"
     """
+    # Auth context is already verified by WebhookAuthDep
+    source = auth.source
+    client_ip = auth.client_ip
+    
+    logger.info(
+        f"Authenticated webhook request for '{source}' from IP: {client_ip}"
+    )
+    
     try:
         # Parse form data
         form_data = await request.form()
@@ -138,18 +167,65 @@ async def ragic_webhook(
 
 @router.post("/ragic/sync", response_model=SyncTriggerResponse)
 async def trigger_sync(
+    request: Request,
     source: Optional[str] = Query(None, description="Specific service to sync, or all if omitted"),
+    api_key: Optional[str] = Query(None, description="API key for authentication", alias="key"),
 ) -> SyncTriggerResponse:
     """
     Manually trigger a Ragic data sync.
     
+    Security:
+        This endpoint requires authentication via:
+        - API key query parameter: ?key=<api_key>
+        - X-API-Key header
+    
     Query Parameters:
         source: Optional. Specific service key to sync.
                 If omitted, syncs all registered services.
+        key: API key for authentication
+    
+    Headers:
+        X-API-Key: <api_key>
     
     Note: This endpoint starts sync in-place (not background).
           For large datasets, this may take time.
     """
+    from core.providers import get_configuration_provider
+    from core.dependencies import _get_client_ip
+    
+    config = get_configuration_provider()
+    client_ip = _get_client_ip(request)
+    
+    # Get API key from header or query parameter
+    provided_key = api_key or request.headers.get("X-API-Key")
+    expected_key = config.get("webhook.default_secret")
+    
+    if not expected_key:
+        logger.error(f"Sync endpoint called but no API key configured. IP: {client_ip}")
+        raise HTTPException(
+            status_code=500,
+            detail="API key not configured on server"
+        )
+    
+    if not provided_key:
+        logger.warning(f"Sync endpoint called without API key from IP: {client_ip}")
+        raise HTTPException(
+            status_code=401,
+            detail="API key required",
+            headers={"WWW-Authenticate": "ApiKey"},
+        )
+    
+    # Use constant-time comparison
+    import secrets
+    if not secrets.compare_digest(provided_key, expected_key):
+        logger.warning(f"Invalid API key for sync endpoint from IP: {client_ip}")
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid API key"
+        )
+    
+    logger.info(f"Authenticated sync request from IP: {client_ip}")
+    
     try:
         sync_manager = get_sync_manager()
         
