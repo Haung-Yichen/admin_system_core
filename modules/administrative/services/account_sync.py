@@ -9,7 +9,7 @@ from modules.administrative.core.config import (
     get_account_form,
 )
 from modules.administrative.models import AdministrativeAccount
-from modules.administrative.services.ragic_sync import RagicSyncService
+from modules.administrative.services.ragic_sync import transform_ragic_record
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +20,6 @@ class AccountSyncService(BaseRagicSyncService[AdministrativeAccount]):
     
     def __init__(self):
         super().__init__(AdministrativeAccount)
-        # Reuse logic from existing service for transformation to avoid duplication
-        # In a full refactor, logic should be moved here completely
-        self._legacy_service = RagicSyncService() 
 
     def get_ragic_config(self) -> Dict[str, Any]:
         """Return Ragic form configuration."""
@@ -36,7 +33,5 @@ class AccountSyncService(BaseRagicSyncService[AdministrativeAccount]):
         """
         Map a Ragic record to a dictionary suitable for model creation.
         """
-        # Reuse the transformation logic from the existing service
-        # We need to access the private method or move it to a utility
-        # For now, accessing it is the quickest way
-        return self._legacy_service._transform_account_record(record)
+        # Use the module-level transform function
+        return transform_ragic_record(record)

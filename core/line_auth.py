@@ -285,16 +285,9 @@ async def get_verified_user(
         HTTPException 401: If no token provided or token is invalid/expired.
         HTTPException 403: If account is not bound to a company email.
     """
-    import os
-
-    # Development mode bypass
-    if os.environ.get("DEBUG_SKIP_AUTH", "").lower() in ("true", "1", "yes"):
-        logger.warning("[DEV MODE] Skipping LINE authentication")
-        return VerifiedUser(
-            line_sub="dev_user",
-            email="test@example.com",
-            line_name="Dev User",
-        )
+    # NOTE: 開發測試請使用 FastAPI 的 dependency_overrides 或 Mock，
+    # 例如: app.dependency_overrides[get_verified_user] = lambda: VerifiedUser(...)
+    # 不在生產程式碼中保留任何繞過驗證的後門。
 
     # Consolidate token inputs (Header > Query > Bearer)
     id_token = x_line_id_token or q_line_id_token

@@ -80,6 +80,42 @@ async def serve_leave_form_js() -> FileResponse:
 
 
 @router.get(
+    "/verify-redirect",
+    response_class=HTMLResponse,
+    summary="Email Verification Redirect",
+    description="Serve the LIFF verification redirect page for email deep linking.",
+)
+async def serve_verify_redirect() -> FileResponse:
+    """
+    Serve the LIFF email verification redirect page.
+
+    This page handles email verification tokens via LIFF deep linking,
+    providing a seamless mobile-native experience.
+
+    LIFF Endpoint should be set to:
+    https://your-domain.com/api/administrative/liff/verify-redirect
+    """
+    html_path = STATIC_DIR / "verify_redirect.html"
+
+    if not html_path.exists():
+        logger.error(f"Verify redirect page not found: {html_path}")
+        return HTMLResponse(
+            content="<html><body><h1>Page Not Found</h1></body></html>",
+            status_code=404,
+        )
+
+    # Prevent token caching - critical for security
+    response = FileResponse(
+        path=html_path,
+        media_type="text/html",
+    )
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
+@router.get(
     "/config",
     summary="Get LIFF Configuration",
     description="Return LIFF-related configuration for frontend.",
@@ -96,6 +132,7 @@ async def get_liff_config() -> dict:
 
     result = {
         "liff_id_leave": (settings.line_liff_id_leave or "").strip(),
+        "liff_id_verify": getattr(settings, "line_liff_id_verify", "") or "",
     }
     logger.info(f"LIFF config returned: {result}")
     return result

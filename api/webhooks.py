@@ -107,21 +107,6 @@ async def ragic_webhook(
         
         logger.info(f"Received Ragic webhook for '{source}': {data}")
         
-        # Extract ragic_id
-        ragic_id = data.get("_ragicId") or data.get("ragicId") or data.get("id")
-        
-        if not ragic_id:
-            logger.warning("Webhook missing ragic_id")
-            raise HTTPException(status_code=400, detail="Missing ragic_id")
-        
-        try:
-            ragic_id = int(ragic_id)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="Invalid ragic_id format")
-        
-        # Determine action
-        action = str(data.get("action", "update")).lower()
-        
         # Dispatch to sync manager
         sync_manager = get_sync_manager()
         
@@ -132,6 +117,35 @@ async def ragic_webhook(
                 detail=f"Sync service '{source}' not found. "
                        f"Available: {[s['key'] for s in sync_manager.list_services()]}"
             )
+        
+        # Extract ragic_id
+        ragic_id = data.get("_ragicId") or data.get("ragicId") or data.get("id")
+        
+        if not ragic_id:
+            # No ragic_id provided - trigger full sync instead
+            logger.info(f"Webhook missing ragic_id, triggering full sync for '{source}'")
+            result = await sync_manager.sync_service(source)
+            
+            if result and result.errors == 0:
+                return WebhookResponse(
+                    success=True,
+                    message=f"Full sync completed: {result.synced} records synced",
+                    source=source,
+                )
+            else:
+                return WebhookResponse(
+                    success=False,
+                    message=f"Full sync failed with {result.errors if result else 'unknown'} errors",
+                    source=source,
+                )
+        
+        try:
+            ragic_id = int(ragic_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Invalid ragic_id format")
+        
+        # Determine action
+        action = str(data.get("action", "update")).lower()
         
         result = await sync_manager.handle_webhook(source, ragic_id, action)
         

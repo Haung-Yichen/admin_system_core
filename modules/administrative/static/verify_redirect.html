@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>驗證中 - HSIB Admin System</title>
+
+    <!-- LIFF SDK (Official CDN) - Must load before app script -->
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --primary: #1A1A2E;
+            --accent: #06C755;
+            --success: #06C755;
+            --error: #E74C3C;
+            --text: #333333;
+            --text-light: #666666;
+            --bg: #F5F7FA;
+            --card-bg: #FFFFFF;
+            --shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            --radius: 16px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans TC', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: var(--card-bg);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 40px 30px;
+            text-align: center;
+            max-width: 400px;
+            width: 100%;
+        }
+
+        /* Spinner */
+        .spinner {
+            width: 56px;
+            height: 56px;
+            border: 4px solid #E0E0E0;
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 24px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Status Icons */
+        .status-icon {
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px;
+            font-size: 36px;
+        }
+
+        .status-icon.success {
+            background: rgba(6, 199, 85, 0.1);
+            color: var(--success);
+        }
+
+        .status-icon.error {
+            background: rgba(231, 76, 60, 0.1);
+            color: var(--error);
+        }
+
+        /* Text Styles */
+        .title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: var(--text);
+        }
+
+        .message {
+            font-size: 0.95rem;
+            color: var(--text-light);
+            line-height: 1.6;
+        }
+
+        .error-detail {
+            margin-top: 16px;
+            padding: 12px;
+            background: rgba(231, 76, 60, 0.05);
+            border-radius: 8px;
+            font-size: 0.85rem;
+            color: var(--error);
+            word-break: break-word;
+        }
+
+        /* Hidden states */
+        .hidden {
+            display: none !important;
+        }
+
+        /* Close hint */
+        .close-hint {
+            margin-top: 20px;
+            font-size: 0.85rem;
+            color: var(--text-light);
+            opacity: 0.8;
+        }
+
+        /* Retry button */
+        .retry-btn {
+            margin-top: 20px;
+            padding: 12px 32px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 25px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .retry-btn:hover {
+            opacity: 0.9;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <!-- Loading State -->
+        <div id="loading-state">
+            <div class="spinner"></div>
+            <h1 class="title">驗證中...</h1>
+            <p class="message">請稍候，正在驗證您的請求</p>
+        </div>
+
+        <!-- Success State -->
+        <div id="success-state" class="hidden">
+            <div class="status-icon success">✓</div>
+            <h1 class="title">驗證成功！</h1>
+            <p class="message">您的驗證已完成，即將返回聊天室</p>
+            <p class="close-hint">視窗即將自動關閉...</p>
+        </div>
+
+        <!-- Error State -->
+        <div id="error-state" class="hidden">
+            <div class="status-icon error">✕</div>
+            <h1 class="title">驗證失敗</h1>
+            <p class="message" id="error-message">請重新嘗試或聯繫管理員</p>
+            <div class="error-detail hidden" id="error-detail"></div>
+            <button class="retry-btn" onclick="closeWindow()">關閉視窗</button>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * Email Verification Redirect Handler
+         * 
+         * Flow:
+         * 1. Initialize LIFF
+         * 2. Extract token from URL query parameters
+         * 3. Call backend verification API
+         * 4. Show success and close window, or show error
+         */
+
+        // Configuration
+        const API_BASE_URL = '/api/auth/verify';
+        const CLOSE_DELAY_MS = 2000;
+
+        // DOM Elements
+        const loadingState = document.getElementById('loading-state');
+        const successState = document.getElementById('success-state');
+        const errorState = document.getElementById('error-state');
+        const errorMessage = document.getElementById('error-message');
+        const errorDetail = document.getElementById('error-detail');
+
+        /**
+         * Show a specific state and hide others
+         * @param {'loading' | 'success' | 'error'} state 
+         */
+        function showState(state) {
+            loadingState.classList.toggle('hidden', state !== 'loading');
+            successState.classList.toggle('hidden', state !== 'success');
+            errorState.classList.toggle('hidden', state !== 'error');
+        }
+
+        /**
+         * Display error message with optional details
+         * @param {string} message - User-friendly error message
+         * @param {string} [detail] - Technical detail (optional)
+         */
+        function showError(message, detail = null) {
+            errorMessage.textContent = message;
+            if (detail) {
+                errorDetail.textContent = detail;
+                errorDetail.classList.remove('hidden');
+            } else {
+                errorDetail.classList.add('hidden');
+            }
+            showState('error');
+        }
+
+        /**
+         * Close the LIFF window or fallback to regular close
+         */
+        function closeWindow() {
+            if (typeof liff !== 'undefined' && liff.isInClient && liff.isInClient()) {
+                liff.closeWindow();
+            } else {
+                // Fallback for external browser
+                window.close();
+            }
+        }
+
+        /**
+         * Extract token from URL query parameters
+         * @returns {string | null} Token if found
+         */
+        function getTokenFromUrl() {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get('token');
+        }
+
+        /**
+         * Call the backend verification API
+         * @param {string} token - Verification token
+         * @returns {Promise<{success: boolean, message?: string, error?: string}>}
+         */
+        async function verifyToken(token) {
+            const response = await fetch(`${API_BASE_URL}?token=${encodeURIComponent(token)}`, {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                },
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.detail || data.message || `HTTP ${response.status}`);
+            }
+
+            return data;
+        }
+
+        /**
+         * Get LIFF ID from backend config
+         * @returns {Promise<string>}
+         */
+        async function getLiffId() {
+            try {
+                const response = await fetch('/api/administrative/liff/config');
+                const data = await response.json();
+                // Try to get a verification-specific LIFF ID, fallback to leave form ID
+                return data.liff_id_verify || data.liff_id_leave || '';
+            } catch (error) {
+                console.error('Failed to fetch LIFF config:', error);
+                return '';
+            }
+        }
+
+        /**
+         * Main initialization and verification flow
+         */
+        async function main() {
+            try {
+                // Step 1: Get LIFF ID and initialize
+                const liffId = await getLiffId();
+                
+                if (!liffId) {
+                    showError('系統配置錯誤', 'LIFF ID 未設定');
+                    return;
+                }
+
+                await liff.init({ liffId });
+                console.log('LIFF initialized successfully');
+
+                // Step 2: Extract token from URL
+                const token = getTokenFromUrl();
+
+                if (!token) {
+                    showError('驗證連結無效', '缺少驗證碼參數');
+                    return;
+                }
+
+                // Step 3: Call verification API
+                const result = await verifyToken(token);
+
+                // Step 4: Handle success
+                showState('success');
+
+                // Step 5: Close window after delay
+                setTimeout(() => {
+                    closeWindow();
+                }, CLOSE_DELAY_MS);
+
+            } catch (error) {
+                console.error('Verification error:', error);
+                
+                // Determine user-friendly error message
+                let userMessage = '驗證過程發生錯誤，請重試';
+                let technicalDetail = error.message;
+
+                if (error.message.includes('expired')) {
+                    userMessage = '驗證連結已過期';
+                    technicalDetail = '請重新申請驗證';
+                } else if (error.message.includes('invalid') || error.message.includes('not found')) {
+                    userMessage = '驗證連結無效';
+                    technicalDetail = '連結可能已被使用或不存在';
+                } else if (error.message.includes('LIFF')) {
+                    userMessage = 'LINE 應用程式初始化失敗';
+                    technicalDetail = '請確認是否從 LINE 應用程式開啟';
+                }
+
+                showError(userMessage, technicalDetail);
+            }
+        }
+
+        // Start the verification flow when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', main);
+        } else {
+            main();
+        }
+    </script>
+</body>
+
+</html>

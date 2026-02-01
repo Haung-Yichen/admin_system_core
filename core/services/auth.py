@@ -116,12 +116,32 @@ class AuthService:
     def __init__(
         self,
         ragic_service: RagicService | None = None,
+        config_loader: ConfigLoader | None = None,
     ) -> None:
+        """
+        Initialize AuthService with injectable dependencies.
+
+        Args:
+            ragic_service: RagicService instance for employee verification.
+                          If None, uses global singleton.
+            config_loader: ConfigLoader instance for configuration.
+                          If None, creates and loads a new instance.
+
+        Note:
+            For unit testing, inject mock dependencies:
+            >>> mock_ragic = Mock(spec=RagicService)
+            >>> mock_config = Mock(spec=ConfigLoader)
+            >>> service = AuthService(ragic_service=mock_ragic, config_loader=mock_config)
+        """
         self._ragic_service = ragic_service or get_ragic_service()
 
-        # Load global config
-        self._config_loader = ConfigLoader()
-        self._config_loader.load()
+        # Use injected config loader or create new one
+        if config_loader is not None:
+            self._config_loader = config_loader
+        else:
+            self._config_loader = ConfigLoader()
+            self._config_loader.load()
+
         self._security_config = self._config_loader.get("security", {})
         self._email_config = self._config_loader.get("email", {})
         self._app_name = self._config_loader.get(
@@ -361,6 +381,9 @@ class AuthService:
     # Magic Link Binding Flow
     # =========================================================================
 
+    # 統一的成功訊息，防止使用者枚舉攻擊
+    MAGIC_LINK_SUCCESS_MESSAGE = "如果此信箱已註冊為員工，驗證連結將會寄出。"
+
     async def initiate_magic_link(
         self,
         email: str,
@@ -369,42 +392,86 @@ class AuthService:
         """
         Initiate magic link authentication flow for LINE account binding.
 
+        Security Note:
+            This method is designed to prevent user enumeration attacks.
+            Regardless of whether the email exists in the system, the response
+            is always the same generic success message. This prevents attackers
+            from discovering valid employee email addresses.
+
         Args:
             email: Company email address to bind.
             line_sub: LINE ID Token 'sub' claim.
 
         Returns:
-            str: Status message.
+            str: Generic status message (always the same, regardless of email validity).
 
-        Raises:
-            EmailNotFoundError: If email not in Ragic employee database.
-            EmailSendError: If email sending fails.
+        Note:
+            This method no longer raises EmailNotFoundError to the caller.
+            Invalid emails are logged internally but do not affect the response.
         """
+        # 使用安全的 log 格式，避免洩漏完整 email
+        email_masked = self._mask_email(email)
         logger.info(
-            f"Initiating magic link for: {email}, line_sub: {line_sub[:8]}...")
+            f"Magic link request for: {email_masked}, line_sub: {line_sub[:8]}...")
 
-        employee = await self._ragic_service.verify_email_exists(email)
+        try:
+            employee = await self._ragic_service.verify_email_exists(email)
 
-        if employee is None:
-            logger.warning(f"Email not found in Ragic: {email}")
-            raise EmailNotFoundError(
-                f"Email '{email}' is not registered as an employee."
+            if employee is None:
+                # 記錄但不拋出例外，防止使用者枚舉
+                logger.warning(
+                    f"[USER_ENUM_PROTECTION] Magic link requested for non-existent email: {email_masked}"
+                )
+                # 返回與成功相同的訊息
+                return self.MAGIC_LINK_SUCCESS_MESSAGE
+
+            if not employee.is_active:
+                # 記錄但不拋出例外，防止使用者枚舉
+                logger.warning(
+                    f"[USER_ENUM_PROTECTION] Magic link requested for inactive employee: {email_masked}"
+                )
+                return self.MAGIC_LINK_SUCCESS_MESSAGE
+
+            magic_link = self.generate_magic_link(email, line_sub)
+
+            await self._send_verification_email(
+                to_email=email,
+                employee_name=employee.name,
+                magic_link=magic_link,
             )
 
-        if not employee.is_active:
-            raise EmailNotFoundError(
-                "Your employee account is currently inactive.")
+            logger.info(f"Magic link sent to: {email_masked}")
 
-        magic_link = self.generate_magic_link(email, line_sub)
+        except EmailSendError as e:
+            # 郵件發送失敗仍記錄，但對外返回相同訊息
+            logger.error(
+                f"[EMAIL_SEND_FAILURE] Failed to send magic link to {email_masked}: {e}"
+            )
+            # 不重新拋出，維持一致的回應
 
-        await self._send_verification_email(
-            to_email=email,
-            employee_name=employee.name,
-            magic_link=magic_link,
-        )
+        except Exception as e:
+            # 其他未預期錯誤也記錄，但不影響回應
+            logger.error(
+                f"[UNEXPECTED_ERROR] Magic link initiation failed for {email_masked}: {e}"
+            )
 
-        logger.info(f"Magic link sent to: {email}")
-        return f"Verification email sent to {email}"
+        return self.MAGIC_LINK_SUCCESS_MESSAGE
+
+    @staticmethod
+    def _mask_email(email: str) -> str:
+        """
+        Mask email for secure logging.
+
+        Example: "john.doe@company.com" -> "jo***@company.com"
+        """
+        if "@" not in email:
+            return "***"
+        local, domain = email.rsplit("@", 1)
+        if len(local) <= 2:
+            masked_local = local[0] + "***" if local else "***"
+        else:
+            masked_local = local[:2] + "***"
+        return f"{masked_local}@{domain}"
 
     def generate_magic_link(self, email: str, line_sub: str) -> str:
         """Generate a magic link URL with signed JWT token."""

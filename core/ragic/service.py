@@ -50,10 +50,38 @@ class RagicService:
         
         self._timeout = timeout
         self._client: Optional[httpx.AsyncClient] = None
+        self._client_loop_id: Optional[int] = None  # Track which event loop the client belongs to
     
     def _get_client(self) -> httpx.AsyncClient:
-        """Get or create the HTTP client."""
-        if self._client is None:
+        """Get or create the HTTP client.
+        
+        Handles event loop lifecycle - if the previous event loop was closed
+        or we're in a different event loop, creates a new client.
+        """
+        import asyncio
+        
+        # Get current event loop id
+        try:
+            current_loop = asyncio.get_running_loop()
+            current_loop_id = id(current_loop)
+        except RuntimeError:
+            # No running loop - this shouldn't happen in async context
+            # but handle gracefully
+            current_loop_id = None
+        
+        # Check if we need a new client:
+        # 1. No client exists
+        # 2. Client was created for a different event loop
+        # 3. Client appears to be closed/invalid
+        need_new_client = (
+            self._client is None or
+            self._client_loop_id != current_loop_id or
+            (self._client is not None and self._client.is_closed)
+        )
+        
+        if need_new_client:
+            # Don't try to close old client - it's bound to a dead loop
+            # Just discard the reference and let GC handle it
             self._client = httpx.AsyncClient(
                 timeout=self._timeout,
                 headers={
@@ -61,6 +89,9 @@ class RagicService:
                     "Content-Type": "application/json",
                 },
             )
+            self._client_loop_id = current_loop_id
+            logger.debug(f"Created new httpx client for event loop {current_loop_id}")
+        
         return self._client
     
     async def close(self) -> None:
