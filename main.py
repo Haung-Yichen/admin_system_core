@@ -31,6 +31,40 @@ MODULES_DIR = "modules"
 
 
 # -----------------------------------------------------------------------------
+# Core Sync Service Registration
+# -----------------------------------------------------------------------------
+
+
+def _register_core_sync_services() -> None:
+    """
+    Register framework-level Ragic sync services.
+    
+    Core sync services handle data that is shared across all modules,
+    such as User Identity (LINE <-> Email binding).
+    
+    This follows the same pattern as module-level sync services but
+    is registered by the framework during startup.
+    """
+    from core.ragic import get_sync_manager
+    from core.services.user_sync import get_user_sync_service
+    
+    logger = logging.getLogger(__name__)
+    sync_manager = get_sync_manager()
+    
+    try:
+        sync_manager.register(
+            key="core_user",
+            name="User Identity (LINE Binding)",
+            service=get_user_sync_service(),
+            module_name="core",
+            auto_sync_on_startup=True,  # Sync user data on startup
+        )
+        logger.info("Registered core_user sync service")
+    except Exception as e:
+        logger.error(f"Failed to register UserSyncService: {e}")
+
+
+# -----------------------------------------------------------------------------
 # Application Factory
 # -----------------------------------------------------------------------------
 
@@ -130,6 +164,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
         raise
+
+    # Register core sync services (User Identity Ragic sync)
+    _register_core_sync_services()
+    logger.info("Core sync services registered")
 
     # Start background sync for all registered Ragic services
     from core.ragic import get_sync_manager

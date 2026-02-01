@@ -150,6 +150,12 @@ def get_leave_type_form() -> RagicFormConfig:
 
 
 @lru_cache(maxsize=5)
+def get_user_form() -> RagicFormConfig:
+    """Get User Identity form configuration."""
+    return RagicFormConfig("user_form")
+
+
+@lru_cache(maxsize=5)
 def get_sop_form() -> RagicFormConfig:
     """Get SOP Knowledge Base form configuration."""
     return RagicFormConfig("sop_form")

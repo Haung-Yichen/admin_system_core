@@ -8,11 +8,17 @@ Identity Strategy:
     - LINE user ID (from Messaging API) is used as the LINE identity
     - For LIFF apps, LINE ID Token 'sub' claim can also be used
     - Company email is bound via Magic Link verification
+
+Data Architecture:
+    - Ragic is the MASTER data source (Write-Through strategy)
+    - Local PostgreSQL is the READ-REPLICA/CACHE
+    - Writes go to Ragic first, then sync to local DB
+    - Webhooks keep local DB in sync with Ragic changes
 """
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Boolean, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.database.base import Base, TimestampMixin, UUIDPrimaryKey
@@ -29,8 +35,15 @@ class User(Base, TimestampMixin):
     The `line_user_id` is the LINE user identifier from webhook events
     or OIDC 'sub' claim from LINE ID Token.
 
+    Data Architecture:
+        - `ragic_id` stores the Ragic internal record ID (_ragicId)
+        - Local fields are synchronized from Ragic (Master -> Replica)
+        - Encrypted fields are stored in plain text in Ragic for admin operations
+        - Local DB uses AES-256-GCM encryption with blind indexes for lookups
+
     Attributes:
-        id: UUID primary key.
+        id: UUID primary key (local DB).
+        ragic_id: Ragic internal record ID (_ragicId) for sync tracking.
         line_user_id: LINE user identifier (from webhook or OIDC sub).
         email: Company email address (verified via Magic Link + Ragic).
         ragic_employee_id: Reference ID from Ragic database.
@@ -42,6 +55,15 @@ class User(Base, TimestampMixin):
     __tablename__ = "users"
 
     id: Mapped[UUIDPrimaryKey]
+
+    # Ragic sync tracking - stores the Ragic internal record ID
+    ragic_id: Mapped[int | None] = mapped_column(
+        Integer,
+        unique=True,
+        index=True,
+        nullable=True,
+        comment="Ragic internal record ID (_ragicId) for sync",
+    )
 
     # LINE Identity - user ID from webhook or 'sub' claim from ID Token
     line_user_id: Mapped[str] = mapped_column(

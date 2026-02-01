@@ -150,5 +150,25 @@
       "KEYWORDS": "1006065",
       "CONTENT": "1006066"
     }
+  },
+
+  "user_form": {
+    "description": "使用者身份表 - LINE 使用者與公司 Email 綁定",
+    "url": "https://ap13.ragic.com/HSIBAdmSys/ychn-test/13",
+    "sheet_path": "/HSIBAdmSys/ychn-test/13",
+    "key_field": "1006071",
+    "fields": {
+      "LOCAL_DB_ID": "1006070",
+      "LINE_USER_ID": "1006071",
+      "LINE_USER_ID_HASH": "1006072",
+      "EMAIL": "1006073",
+      "EMAIL_HASH": "1006074",
+      "RAGIC_EMPLOYEE_ID": "1006075",
+      "DISPLAY_NAME": "1006076",
+      "IS_ACTIVE": "1006077",
+      "LAST_LOGIN_AT": "1006078",
+      "CREATED_AT": "1006079",
+      "UPDATED_AT": "1006080"
+    }
   }
 }

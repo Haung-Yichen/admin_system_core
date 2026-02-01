@@ -31,6 +31,13 @@ from core.services.email import (
     EmailTemplates,
     get_email_service,
 )
+from core.services.user_sync import (
+    UserSyncService,
+    UserRagicWriter,
+    RagicUserFieldMapping,
+    get_user_sync_service,
+    get_user_ragic_writer,
+)
 
 __all__ = [
     # Ragic
@@ -60,4 +67,10 @@ __all__ = [
     "EmailConfig",
     "EmailTemplates",
     "get_email_service",
+    # User Sync (Ragic Master)
+    "UserSyncService",
+    "UserRagicWriter",
+    "RagicUserFieldMapping",
+    "get_user_sync_service",
+    "get_user_ragic_writer",
 ]

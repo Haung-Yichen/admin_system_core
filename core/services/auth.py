@@ -581,9 +581,23 @@ class AuthService:
     async def _create_bound_user(
         self, db: AsyncSession, email: str, line_sub: str
     ) -> User:
-        """Create new user with encrypted fields and blind indexes."""
+        """
+        Create new user with Write-Through to Ragic.
+        
+        Strategy:
+            1. Verify employee exists in Ragic
+            2. Create local User record first (to get UUID)
+            3. Write to Ragic with local UUID
+            4. Update local record with ragic_id
+        
+        This ensures immediate consistency - user can login instantly
+        without waiting for webhook sync.
+        """
+        from core.services.user_sync import get_user_ragic_writer
+        
         employee = await self._ragic_service.verify_email_exists(email)
 
+        # Step 1: Create local user first (generates UUID)
         user = User(
             email=email,
             email_hash=generate_blind_index(email),
@@ -595,22 +609,104 @@ class AuthService:
             last_login_at=datetime.now(timezone.utc),
         )
         db.add(user)
+        await db.flush()  # Generate UUID
+        
         logger.info(
-            f"Created new user: {email} bound to LINE ID: {line_sub[:8]}...")
+            f"Created local user: {self._mask_email(email)} bound to LINE ID: {line_sub[:8]}..."
+        )
+        
+        # Step 2: Write-Through to Ragic (Master)
+        ragic_writer = get_user_ragic_writer()
+        try:
+            ragic_id = await ragic_writer.create_user_in_ragic(
+                local_db_id=user.id,
+                email=email,  # Plain text to Ragic
+                line_user_id=line_sub,  # Plain text to Ragic
+                ragic_employee_id=employee.employee_id if employee else None,
+                display_name=employee.name if employee else None,
+            )
+            
+            if ragic_id:
+                # Update local record with ragic_id
+                user.ragic_id = ragic_id
+                logger.info(f"Ragic sync successful: ragic_id={ragic_id}")
+            else:
+                # Log warning but don't fail - local DB is still valid
+                # Webhook can sync ragic_id later
+                logger.warning(
+                    f"Ragic write failed for user {user.id}, "
+                    "will sync via webhook later"
+                )
+        except Exception as e:
+            # Log error but don't fail the user creation
+            # The local DB record is valid, Ragic sync can be retried
+            logger.error(f"Ragic write-through failed: {e}")
+        
         return user
 
     async def _update_user_binding(
         self, db: AsyncSession, user: User, email: str, line_sub: str
     ) -> User:
-        """Update user binding with encrypted fields and blind indexes."""
+        """
+        Update user binding with Write-Through to Ragic.
+        
+        Strategy:
+            1. Update local DB first
+            2. Write-Through to Ragic
+            3. If Ragic fails, local update still succeeds (eventual consistency)
+        """
+        from core.services.user_sync import get_user_ragic_writer
+        
+        # Step 1: Update local user
         user.email = email
         user.email_hash = generate_blind_index(email)
         user.line_user_id = line_sub
         user.line_user_id_hash = generate_blind_index(line_sub)
         user.is_active = True
         user.last_login_at = datetime.now(timezone.utc)
+        
         logger.info(
-            f"Updated user binding: {email} <-> LINE ID: {line_sub[:8]}...")
+            f"Updated local user binding: {self._mask_email(email)} <-> LINE ID: {line_sub[:8]}..."
+        )
+        
+        # Step 2: Write-Through to Ragic (if ragic_id exists)
+        if user.ragic_id:
+            ragic_writer = get_user_ragic_writer()
+            try:
+                success = await ragic_writer.update_user_in_ragic(
+                    ragic_id=user.ragic_id,
+                    local_db_id=user.id,
+                    email=email,  # Plain text to Ragic
+                    line_user_id=line_sub,  # Plain text to Ragic
+                    ragic_employee_id=user.ragic_employee_id,
+                    display_name=user.display_name,
+                    is_active=True,
+                )
+                
+                if success:
+                    logger.info(f"Ragic update successful: ragic_id={user.ragic_id}")
+                else:
+                    logger.warning(f"Ragic update failed for ragic_id={user.ragic_id}")
+            except Exception as e:
+                logger.error(f"Ragic write-through update failed: {e}")
+        else:
+            # No ragic_id - try to create in Ragic
+            ragic_writer = get_user_ragic_writer()
+            try:
+                ragic_id = await ragic_writer.create_user_in_ragic(
+                    local_db_id=user.id,
+                    email=email,
+                    line_user_id=line_sub,
+                    ragic_employee_id=user.ragic_employee_id,
+                    display_name=user.display_name,
+                )
+                
+                if ragic_id:
+                    user.ragic_id = ragic_id
+                    logger.info(f"Created user in Ragic: ragic_id={ragic_id}")
+            except Exception as e:
+                logger.error(f"Ragic create failed during update: {e}")
+        
         return user
 
     async def _send_verification_email(

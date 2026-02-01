@@ -26,6 +26,7 @@ from core.ragic.columns import (
     get_leave_form,
     get_leave_type_form,
     get_sop_form,
+    get_user_form,
 )
 from core.ragic.sync_base import (
     BaseRagicSyncService,
@@ -53,6 +54,7 @@ __all__ = [
     "get_leave_form",
     "get_leave_type_form",
     "get_sop_form",
+    "get_user_form",
     # Sync infrastructure
     "BaseRagicSyncService",
     "RagicSyncManager",
