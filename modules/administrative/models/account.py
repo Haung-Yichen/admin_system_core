@@ -19,6 +19,7 @@ from sqlalchemy import Boolean, Date, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.database.base import Base, TimestampMixin
+from core.security import EncryptedType
 
 
 class AdministrativeAccount(Base, TimestampMixin):
@@ -48,10 +49,9 @@ class AdministrativeAccount(Base, TimestampMixin):
         comment="帳號 (Ragic Field 1005972)",
     )
     id_card_number: Mapped[Optional[str]] = mapped_column(
-        String(20),
+        EncryptedType(512),
         nullable=True,
-        index=True,
-        comment="身份證字號 (Ragic Field 1005973)",
+        comment="身份證字號 (Ragic Field 1005973) - Encrypted",
     )
     employee_id: Mapped[Optional[str]] = mapped_column(
         String(50),
@@ -92,19 +92,25 @@ class AdministrativeAccount(Base, TimestampMixin):
 
     # === Contact Info ===
     emails: Mapped[Optional[str]] = mapped_column(
-        Text,
+        EncryptedType(1024),
         nullable=True,
-        comment="E-Mail, 逗號分隔多值 (Ragic Field 1005977)",
+        comment="E-Mail, 逗號分隔多值 (Ragic Field 1005977) - Encrypted",
+    )
+    primary_email_hash: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+        comment="Blind index hash of primary email for exact-match lookup",
     )
     phones: Mapped[Optional[str]] = mapped_column(
-        Text,
+        EncryptedType(512),
         nullable=True,
-        comment="電話, 逗號分隔多值 (Ragic Field 1005986)",
+        comment="電話, 逗號分隔多值 (Ragic Field 1005986) - Encrypted",
     )
     mobiles: Mapped[Optional[str]] = mapped_column(
-        Text,
+        EncryptedType(512),
         nullable=True,
-        comment="手機, 逗號分隔多值 (Ragic Field 1005987)",
+        comment="手機, 逗號分隔多值 (Ragic Field 1005987) - Encrypted",
     )
 
     # === Organization Info ===
@@ -257,58 +263,58 @@ class AdministrativeAccount(Base, TimestampMixin):
 
     # === Address - Household Registration ===
     household_postal_code: Mapped[Optional[str]] = mapped_column(
-        String(10),
+        EncryptedType(256),
         nullable=True,
-        comment="戶籍郵遞區號 (Ragic Field 1005988)",
+        comment="戶籍郵遞區號 (Ragic Field 1005988) - Encrypted",
     )
     household_city: Mapped[Optional[str]] = mapped_column(
-        String(50),
+        EncryptedType(256),
         nullable=True,
-        comment="戶籍縣市 (Ragic Field 1005989)",
+        comment="戶籍縣市 (Ragic Field 1005989) - Encrypted",
     )
     household_district: Mapped[Optional[str]] = mapped_column(
-        String(50),
+        EncryptedType(256),
         nullable=True,
-        comment="戶籍鄉鎮市區 (Ragic Field 1005990)",
+        comment="戶籍鄉鎮市區 (Ragic Field 1005990) - Encrypted",
     )
     household_address: Mapped[Optional[str]] = mapped_column(
-        Text,
+        EncryptedType(1024),
         nullable=True,
-        comment="戶籍地址 (Ragic Field 1005991)",
+        comment="戶籍地址 (Ragic Field 1005991) - Encrypted",
     )
 
     # === Address - Mailing ===
     mailing_postal_code: Mapped[Optional[str]] = mapped_column(
-        String(10),
+        EncryptedType(256),
         nullable=True,
-        comment="通訊郵遞區號 (Ragic Field 1005992)",
+        comment="通訊郵遞區號 (Ragic Field 1005992) - Encrypted",
     )
     mailing_city: Mapped[Optional[str]] = mapped_column(
-        String(50),
+        EncryptedType(256),
         nullable=True,
-        comment="通訊縣市 (Ragic Field 1005993)",
+        comment="通訊縣市 (Ragic Field 1005993) - Encrypted",
     )
     mailing_district: Mapped[Optional[str]] = mapped_column(
-        String(50),
+        EncryptedType(256),
         nullable=True,
-        comment="通訊鄉鎮市區 (Ragic Field 1005994)",
+        comment="通訊鄉鎮市區 (Ragic Field 1005994) - Encrypted",
     )
     mailing_address: Mapped[Optional[str]] = mapped_column(
-        Text,
+        EncryptedType(1024),
         nullable=True,
-        comment="通訊地址 (Ragic Field 1005995)",
+        comment="通訊地址 (Ragic Field 1005995) - Encrypted",
     )
 
     # === Emergency Contact ===
     emergency_contact: Mapped[Optional[str]] = mapped_column(
-        String(100),
+        EncryptedType(512),
         nullable=True,
-        comment="緊急聯絡人 (Ragic Field 1005996)",
+        comment="緊急聯絡人 (Ragic Field 1005996) - Encrypted",
     )
     emergency_phone: Mapped[Optional[str]] = mapped_column(
-        String(50),
+        EncryptedType(256),
         nullable=True,
-        comment="緊急聯絡電話 (Ragic Field 1005997)",
+        comment="緊急聯絡電話 (Ragic Field 1005997) - Encrypted",
     )
 
     # === Life Insurance License ===

@@ -24,7 +24,7 @@ def mock_env_vars(monkeypatch):
         "BASE_URL": "https://test.example.com",
         "APP_DEBUG": "true",
         "APP_LOG_LEVEL": "DEBUG",
-        "DATABASE_URL": "postgresql://test:test@localhost/testdb",
+        "DATABASE_URL": "postgresql+asyncpg://test:test@localhost/testdb",
         "JWT_SECRET_KEY": "test-secret-key-12345",
         "JWT_ALGORITHM": "HS256",
         "MAGIC_LINK_EXPIRE_MINUTES": "30",

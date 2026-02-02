@@ -1,87 +1,93 @@
-# Ragic Webhook 設定指南
+# 外部 Webhook 設定指南
 
-## 使用者身份表 (User Identity) Webhook 設定
+本文件說明如何設定 Ragic 與 LINE 的 Webhook，將事件同步至 HSIB Admin System。
 
-### Webhook URL
-
-```
-https://unministrative-consolitorily-linsey.ngrok-free.dev/api/webhooks/ragic?source=core_user
-```
-
-### 完整設定（含認證）
-
-```
-https://unministrative-consolitorily-linsey.ngrok-free.dev/api/webhooks/ragic?source=core_user&token=my_super_secret_123
-```
+**系統基礎資訊**
+- **對外網址 (Base URL)**: `https://api.hsib.com.tw`
+- **預設 Token**: `my_super_secret_123` (請參考 .env `WEBHOOK_DEFAULT_SECRET`)
 
 ---
 
-## Ragic 後台設定步驟
+## 1. Ragic Webhook 設定
 
-1. **登入 Ragic**
-   - 前往: https://ap13.ragic.com/HSIBAdmSys/ychn-test/13
+當 Ragic 表單資料變動時，通知系統進行同步。
 
-2. **開啟 Webhook 設定**
-   - 點選右上角「工具」按鈕
-   - 選擇「表單工具」→「Webhook」或「API Actions」
+### 支援的同步服務 (Sync Services)
 
-3. **新增 Webhook**
-   - **URL**: 貼上上方的 Webhook URL
+| 表單名稱 | 功能說明 | 服務代碼 (Service Key) | Webhook URL |
+| :--- | :--- | :--- | :--- |
+| **使用者身份表** | LINE 綁定與員工 Email 同步 | `core_user` | `/api/webhooks/ragic?source=core_user` |
+| **統一帳號表** | 員工入職、離職、資料異動 | `administrative_account` | `/api/webhooks/ragic?source=administrative_account` |
+| **SOP 知識庫** | 文件更新同步向量資料庫 | `chatbot_sop` | `/api/webhooks/ragic?source=chatbot_sop` |
+
+### 完整 URL 範例
+
+將 `<Base URL>` 替換為 `https://api.hsib.com.tw`，並加上 Token：
+
+```
+https://api.hsib.com.tw/api/webhooks/ragic?source=core_user&token=my_super_secret_123
+```
+
+### Ragic 後台設定步驟
+
+1. **登入 Ragic** 並進入對應的表單設計模式。
+2. **開啟 Webhook 設定**：工具列 > 「表單工具」 > 「Webhook」或「API Actions」。
+3. **新增 Webhook**：
+   - **URL**: 填入上述對應的完整 URL。
    - **Method**: `POST`
-   - **觸發時機**: 勾選
-     - ✅ 新增資料時
-     - ✅ 修改資料時  
-     - ✅ 刪除資料時
-
-4. **儲存設定**
+   - **Content Type**: `application/x-www-form-urlencoded`
+   - **觸發時機**: 勾選 ✅新增後、✅儲存後、✅刪除後。
+4. **儲存**：完成設定。
 
 ---
 
-## 已註冊的 Sync Services
+## 2. LINE Webhook 設定
 
-| Service Key | Service Name | Webhook URL |
-|-------------|--------------|-------------|
-| `core_user` | User Identity (LINE Binding) | `/api/webhooks/ragic?source=core_user` |
-| `administrative_account` | Employee Accounts | `/api/webhooks/ragic?source=administrative_account` |
+設定 LINE Official Account (OA) 的 Webhook，讓機器人能接收訊息。
 
-> **Note**: `core_user` 是在系統啟動時自動註冊的核心服務
+### 支援的機器人模組
+
+本系統支援多個 LINE Bot，透過 URL 路徑區分模組。
+
+| Bot 名稱 | 對應模組 | Webhook URL |
+| :--- | :--- | :--- |
+| **SOP 查詢機器人** | `chatbot` | `https://api.hsib.com.tw/webhook/line/chatbot` |
+| **行政小幫手** | `administrative` | `https://api.hsib.com.tw/webhook/line/administrative` |
+
+### LINE Developers Console 設定步驟
+
+1. **登入 console**: [LINE Developers](https://developers.line.biz/)
+2. **選擇 Channel**: 點選對應的 Channel (例如 "HSIB SOP Bot")。
+3. **Messaging API 設定**:
+   - 找到 **Webhook URL** 欄位。
+   - 貼上完整的 URL (需為 `https://` 開頭)。
+   - 點選 **Update**。
+   - **務必啟用**: 將下方的 **Use webhook** 開關打開 (變綠色)。
+4. **驗證**: 點選 **Verify** 按鈕，應顯示 `Success`。
+
+### 常見錯誤排除
+
+- **Verify 失敗？**
+  - 確認 URL 是否貼對 Channel (例如：不要把 `chatbot` 的 URL 貼到 `administrative` 的 Channel)。
+  - 這會導致 Channel Secret 驗證失敗 (403 Forbidden)。
+- **機器人沒反應？**
+  - 檢查是否開啟 **Use webhook**。
+  - 檢查 Cloudflare Tunnel logs (`docker logs hsib-cloudflared`) 是否有收到請求。
 
 ---
 
-## Webhook 認證方式
+## 3. 手動測試方式
 
-### 方式 1: URL Token (簡單)
-
-在 URL 後加上 `&token=<secret>`：
-
-```
-/api/webhooks/ragic?source=core_user&token=my_super_secret_123
-```
-
-### 方式 2: HMAC Signature (推薦)
-
-Ragic 自動計算 HMAC-SHA256 簽章並放在 `X-Hub-Signature-256` header 中。
-框架會自動驗證，無需額外設定。
-
----
-
-## 測試 Webhook
-
-### 方式 1: 在 Ragic 新增/修改資料
-
-直接在 Ragic 表單中新增或修改一筆使用者記錄，系統會自動觸發 webhook。
-
-### 方式 2: 使用 cURL 測試
+### 測試 Ragic Webhook (cURL)
 
 ```bash
-curl -X POST "https://unministrative-consolitorily-linsey.ngrok-free.dev/api/webhooks/ragic?source=core_user&token=my_super_secret_123" \
+curl -X POST "https://api.hsib.com.tw/api/webhooks/ragic?source=core_user&token=my_super_secret_123" \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "_ragicId=3"
+  -d "_ragicId=3&action=update"
 ```
 
-### 預期回應
+**預期回應**:
 
-成功時回應：
 ```json
 {
   "success": true,
@@ -91,79 +97,40 @@ curl -X POST "https://unministrative-consolitorily-linsey.ngrok-free.dev/api/web
 }
 ```
 
----
+### 檢測系統狀態
 
-## 系統架構
+您可以透過 API 檢查所有同步服務的狀態：
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Ragic (Master)                       │
-│  - 使用者新增/修改 Email 或 LINE ID                      │
-└────────────────────┬────────────────────────────────────┘
-                     │
-                     │ Webhook Trigger
-                     ▼
-┌─────────────────────────────────────────────────────────┐
-│           /api/webhooks/ragic?source=core_user          │
-│                 (Framework Endpoint)                    │
-└────────────────────┬────────────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────────┐
-│              UserSyncService                            │
-│  - 從 Ragic 讀取明文資料                                 │
-│  - 重新產生 blind index hash                            │
-│  - 加密後寫入本地 DB                                     │
-└────────────────────┬────────────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────────┐
-│           PostgreSQL (Read-Replica/Cache)               │
-│  - 加密儲存 email, line_user_id                         │
-│  - 提供快速查詢能力                                      │
-└─────────────────────────────────────────────────────────┘
-```
-
----
-
-## 常見問題
-
-### Q: Webhook 沒有被觸發？
-
-**檢查清單：**
-1. ✅ Ragic Webhook URL 是否正確
-2. ✅ ngrok 是否正在運行
-3. ✅ FastAPI server 是否正在運行
-4. ✅ Webhook token 是否正確
-
-**除錯方式：**
 ```bash
-# 查看 server log
-tail -f logs/app.log
-
-# 手動觸發測試
-curl -X POST "https://your-domain/api/webhooks/ragic?source=core_user&token=xxx" -d "_ragicId=3"
+curl -s https://api.hsib.com.tw/api/webhooks/ragic/status
 ```
-
-### Q: Webhook 回應 403 Forbidden？
-
-**原因：** Token 驗證失敗
-
-**解決方式：**
-- 確認 `.env` 中的 `WEBHOOK_DEFAULT_SECRET` 與 URL 中的 `token` 參數一致
-- 或使用 Ragic 自動簽章（不加 token 參數）
-
-### Q: 如何查看同步狀態？
-
-**方式 1: API Endpoint**
-```bash
-curl https://your-domain/api/webhooks/ragic/status
-```
-
-**方式 2: Dashboard**
-前往: https://your-domain/static/dashboard.html
 
 ---
+
+## 4. 系統架構參考
+
+```mermaid
+graph TD
+    Ragic[Ragic Database] -->|Webhook (JSON/Form)| Gateway
+    Line[LINE Platform] -->|Webhook (User Event)| Gateway
+    
+    subgraph "HSIB Admin System (Docker)"
+        Gateway[Cloudflare Tunnel] -->|Reverse Proxy| FastAPI
+        
+        subgraph FastAPI [FastAPI Server]
+            Router{Webhook Router}
+            
+            Router -->|source=core_user| UserSync[User Sync Service]
+            Router -->|source=chatbot| SopSync[SOP Sync Service]
+            Router -->|path=/webhook/line/chatbot| ChatbotMod[Chatbot Module]
+            Router -->|path=/webhook/line/admin| AdminMod[Admin Module]
+        end
+        
+        UserSync --> DB[(PostgreSQL)]
+        SopSync --> DB
+    end
+end
+```
 
 ## 相關文檔
 

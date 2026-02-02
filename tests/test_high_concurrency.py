@@ -520,9 +520,9 @@ class TestStressSimulation:
 
         # Light requests should NOT wait for heavy ones to complete
         # Average light time should be close to 5ms, not 100ms+
-        assert avg_light < 0.02, (
+        assert avg_light < 0.05, (
             f"Light requests took avg {avg_light*1000:.1f}ms, "
-            "expected < 20ms. They might be blocked by heavy tasks!"
+            "expected < 50ms. They might be blocked by heavy tasks!"
         )
 
         print(

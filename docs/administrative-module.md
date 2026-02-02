@@ -253,17 +253,9 @@ result = await service.submit_leave_request(request_data, db)
 # =============================================================================
 
 # Ragic API Configuration
+# 注意：詳細的表單 URL 與欄位 ID 對映已移至 ragic_registry.json 統一管理。
+# 這裡只需設定 API Key 與同步參數。
 ADMIN_RAGIC_API_KEY=your_base64_encoded_api_key
-ADMIN_RAGIC_URL_EMPLOYEE=https://ap13.ragic.com/HSIBAdmSys/administrative-work/9
-ADMIN_RAGIC_URL_DEPT=https://ap13.ragic.com/HSIBAdmSys/gaocheng-form-database/32
-
-# Ragic Field Mappings (使用欄位 ID，配合 naming=EID)
-ADMIN_FIELD_EMPLOYEE_EMAIL=1001132
-ADMIN_FIELD_EMPLOYEE_NAME=1001129
-ADMIN_FIELD_EMPLOYEE_DEPARTMENT=1001194
-ADMIN_FIELD_EMPLOYEE_SUPERVISOR_EMAIL=1001182
-ADMIN_FIELD_DEPARTMENT_NAME=1002508
-ADMIN_FIELD_DEPARTMENT_MANAGER_EMAIL=1002509
 
 # Sync Configuration
 ADMIN_SYNC_BATCH_SIZE=100
@@ -274,7 +266,7 @@ ADMIN_LINE_CHANNEL_SECRET=your_channel_secret
 ADMIN_LINE_CHANNEL_ACCESS_TOKEN=your_access_token
 
 # LINE LIFF Configuration (需在 LINE Login Channel 建立)
-ADMIN_LINE_LIFF_ID_LEAVE=your_liff_id
+ADMIN_LINE_LIFF_ID_LEAVE=your_liff_id_from_line_developers
 ```
 
 ---
@@ -285,18 +277,33 @@ ADMIN_LINE_LIFF_ID_LEAVE=your_liff_id
 
 1. 到 [LINE Developers Console](https://developers.line.biz/)
 2. 建立或選擇 **Messaging API** Channel
-3. 設定 Webhook URL：`https://your-domain.com/webhook/line/administrative`
+3. 設定 Webhook URL：`https://api.hsib.com.tw/webhook/line/administrative` (或您的正式網域)
 4. 取得 **Channel Secret** 和 **Channel Access Token**
 5. 填入 `.env`
 
 ### 2. LINE Login Channel (LIFF)
 
-1. 在同一個 Provider 下建立 **LINE Login** Channel
-2. 進入 **LIFF** 分頁，建立 LIFF App：
-   - **Endpoint URL**: `https://your-domain.com/api/administrative/liff/leave-form`
+LIFF 應用程式必須建立在 **LINE Login** Channel 下。由於無法透過 Messaging API 自動建立 LIFF，您必須**手動**在 Console 設定。
+
+1. 在同一個 Provider 下建立 **LINE Login** Channel (或選擇現有的)。
+2. 進入 **LIFF** 分頁，點選 **Add** 建立 LIFF App：
+   - **LIFF App Name**: Administrative Leave Form (自訂)
    - **Size**: Full
-   - **Scopes**: `profile`, `openid`
-3. 取得 **LIFF ID**，填入 `.env`
+   - **Endpoint URL**: `https://api.hsib.com.tw/api/administrative/liff/leave-form`
+     > **注意**：必須使用**HTTPS**且**公開可存取**的網址。
+     > 若您使用 Cloudflare Tunnel，請確保網域配置正確。
+     > **切勿**填寫 `localhost` 或過期的 `ngrok` 網址。
+   - **Scopes**: 勾選 `profile`, `openid`
+3. 儲存後，取得 **LIFF ID** (格式如 `2008988187-xxxxxx`)。
+4. 將 LIFF ID 填入 `.env` 的 `ADMIN_LINE_LIFF_ID_LEAVE`。
+5. (選用) 若有修改 Endpoint URL，請務必在 LINE Developers Console 更新，LIFF 的跳轉是由 LINE 伺服器控制的，重啟容器**不會**更新此設定。
+
+### 常見問題排除
+
+**Q: LIFF 打開後顯示舊的網址 (如 ngrok) 或無法連線？**
+A: 這通常是因為 LINE Developers Console 中的 **Endpoint URL** 尚未更新。
+請登入 LINE Developers Console > LINE Login Channel > LIFF，確認 Endpoint URL 是否為最新的正式網址 (`https://api.hsib.com.tw/...`)。
+LIFF 的轉導邏輯是在 LINE 端的，與本地程式碼無關。
 
 ### 3. 一鍵設定腳本
 

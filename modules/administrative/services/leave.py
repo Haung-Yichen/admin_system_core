@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_standalone_session
 from core.ragic import RagicService
+from core.security import generate_blind_index
 from modules.administrative.core.config import (
     AdminSettings,
     RagicLeaveFieldMapping,
@@ -103,7 +104,9 @@ class LeaveService:
         """
         Get account profile from local cache by email.
 
-        The email is matched against the comma-separated emails field.
+        Uses blind index (primary_email_hash) for exact match lookup on the
+        primary (first) email address. This replaces the previous LIKE-based
+        search to support encrypted email storage.
         
         Args:
             email: Employee email address.
@@ -115,10 +118,13 @@ class LeaveService:
         Raises:
             EmployeeNotFoundError: If not found in cache.
         """
-        # Try exact match first (emails field contains the email)
+        # Compute the blind index hash for the input email
+        email_hash = generate_blind_index(email.strip().lower())
+        
+        # Use exact match on the hash index
         result = await db.execute(
             select(AdministrativeAccount).where(
-                AdministrativeAccount.emails.like(f"%{email}%")
+                AdministrativeAccount.primary_email_hash == email_hash
             )
         )
         account = result.scalar_one_or_none()

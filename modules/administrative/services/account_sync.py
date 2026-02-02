@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 from core.ragic.registry import get_ragic_registry
 from core.ragic.sync_base import BaseRagicSyncService
+from core.security import generate_blind_index
 from modules.administrative.models import AdministrativeAccount
 
 logger = logging.getLogger(__name__)
@@ -582,6 +583,30 @@ class AccountSyncService(BaseRagicSyncService[AdministrativeAccount]):
             form_key="account_form",
         )
 
+    def _compute_primary_email_hash(self, emails: Optional[str]) -> Optional[str]:
+        """
+        Extract primary email and compute blind index hash.
+        
+        The primary email is the first email in the comma-separated list.
+        This hash enables exact-match lookups on encrypted email fields.
+        
+        Args:
+            emails: Comma-separated email list from Ragic.
+            
+        Returns:
+            HMAC-SHA256 hash of the primary (first) email, lowercased,
+            or None if no emails provided.
+        """
+        if not emails:
+            return None
+        
+        # Extract first email, strip whitespace, lowercase for consistency
+        primary_email = emails.split(",")[0].strip().lower()
+        if not primary_email:
+            return None
+        
+        return generate_blind_index(primary_email)
+
     async def map_record_to_dict(self, record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Map a Ragic account record to a dictionary suitable for AdministrativeAccount model.
@@ -630,6 +655,9 @@ class AccountSyncService(BaseRagicSyncService[AdministrativeAccount]):
                 
                 # === Contact Info ===
                 "emails": _parse_string(record.get(Fields.EMAILS())),
+                "primary_email_hash": self._compute_primary_email_hash(
+                    _parse_string(record.get(Fields.EMAILS()))
+                ),
                 "phones": _parse_string(record.get(Fields.PHONES())),
                 "mobiles": _parse_string(record.get(Fields.MOBILES())),
                 

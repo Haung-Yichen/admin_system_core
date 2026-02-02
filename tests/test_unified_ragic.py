@@ -108,13 +108,24 @@ class TestCoreRagicServiceEmployeeVerification:
 
     @pytest.mark.asyncio
     async def test_verify_email_exists_found(
-        self, ragic_service, sample_ragic_employee_records
+        self, ragic_service, mock_async_db_session
     ):
-        """Test email verification when employee exists."""
-        with patch.object(
-            ragic_service, 'get_all_employees',
-            new=AsyncMock(return_value=sample_ragic_employee_records)
-        ):
+        """Test email verification when employee exists in local DB."""
+        from modules.administrative.models.account import AdministrativeAccount
+        
+        account = MagicMock(spec=AdministrativeAccount)
+        account.ragic_id = 1
+        account.account_id = "acc1"
+        account.name = "Alice Chen"
+        account.emails = "alice@example.com"
+        account.employee_id = "E001"
+        account.status = True
+        
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [account]
+        mock_async_db_session.execute.return_value = mock_result
+        
+        with patch('core.services.ragic.get_standalone_session', return_value=mock_async_db_session):
             result = await ragic_service.verify_email_exists("alice@example.com")
         
         assert result is not None
@@ -123,81 +134,100 @@ class TestCoreRagicServiceEmployeeVerification:
 
     @pytest.mark.asyncio
     async def test_verify_email_exists_not_found(
-        self, ragic_service, sample_ragic_employee_records
+        self, ragic_service, mock_async_db_session
     ):
         """Test email verification when employee does not exist."""
-        with patch.object(
-            ragic_service, 'get_all_employees',
-            new=AsyncMock(return_value=sample_ragic_employee_records)
-        ):
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        mock_async_db_session.execute.return_value = mock_result
+        
+        with patch('core.services.ragic.get_standalone_session', return_value=mock_async_db_session):
             result = await ragic_service.verify_email_exists("nonexistent@example.com")
         
         assert result is None
 
     @pytest.mark.asyncio
     async def test_verify_email_case_insensitive(
-        self, ragic_service, sample_ragic_employee_records
+        self, ragic_service, mock_async_db_session
     ):
         """Test email verification is case insensitive."""
-        with patch.object(
-            ragic_service, 'get_all_employees',
-            new=AsyncMock(return_value=sample_ragic_employee_records)
-        ):
-            result = await ragic_service.verify_email_exists("ALICE@EXAMPLE.COM")
+        from modules.administrative.models.account import AdministrativeAccount
+        
+        account = MagicMock(spec=AdministrativeAccount)
+        account.ragic_id = 1
+        account.account_id = "acc1"
+        account.name = "Alice Chen"
+        account.emails = "ALICE@EXAMPLE.COM"
+        account.employee_id = "E001"
+        account.status = True
+        
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [account]
+        mock_async_db_session.execute.return_value = mock_result
+        
+        with patch('core.services.ragic.get_standalone_session', return_value=mock_async_db_session):
+            result = await ragic_service.verify_email_exists("alice@example.com")
         
         assert result is not None
-        assert result.email == "alice@example.com"
+        assert result.email == "ALICE@EXAMPLE.COM"
 
     @pytest.mark.asyncio
     async def test_get_employee_by_id_found(
-        self, ragic_service, sample_ragic_employee_records
+        self, ragic_service, mock_async_db_session
     ):
-        """Test employee lookup by door access ID."""
-        with patch.object(
-            ragic_service, 'get_all_employees',
-            new=AsyncMock(return_value=sample_ragic_employee_records)
-        ):
-            # Assuming 1000389 is the door access ID field
-            result = await ragic_service.get_employee_by_id("E001")
+        """Test employee lookup by employee ID."""
+        from modules.administrative.models.account import AdministrativeAccount
         
-        # This may or may not find depending on field mapping
-        # The test validates the method doesn't crash
+        account = MagicMock(spec=AdministrativeAccount)
+        account.ragic_id = 1
+        account.name = "User"
+        account.emails = "test@example.com"
+        account.employee_id = "E001"
+        account.status = True
+        
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = account
+        mock_async_db_session.execute.return_value = mock_result
+        
+        with patch('core.services.ragic.get_standalone_session', return_value=mock_async_db_session):
+            result = await ragic_service.get_employee_by_id("E001")
+            
+            assert result is not None
+            assert result.employee_id == "E001"
 
     @pytest.mark.asyncio
-    async def test_get_all_employees_success(self, ragic_service, mock_httpx_response):
-        """Test fetching all employees from Ragic."""
-        mock_response = mock_httpx_response(
-            status_code=200,
-            json_data={
-                "1": {"_ragicId": 1, "1000381": "test@example.com"},
-                "2": {"_ragicId": 2, "1000381": "test2@example.com"},
-            }
-        )
+    async def test_get_all_employees_success(self, ragic_service, mock_async_db_session):
+        """Test fetching all employees from local DB."""
+        from modules.administrative.models.account import AdministrativeAccount
         
-        with patch('httpx.AsyncClient') as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client_class.return_value = mock_client
-            
+        account1 = MagicMock(spec=AdministrativeAccount)
+        account1.ragic_id = 1
+        account1.emails = "test@example.com"
+        
+        account2 = MagicMock(spec=AdministrativeAccount)
+        account2.ragic_id = 2
+        account2.emails = "test2@example.com"
+        
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [account1, account2]
+        mock_async_db_session.execute.return_value = mock_result
+        
+        with patch('core.services.ragic.get_standalone_session', return_value=mock_async_db_session):
             result = await ragic_service.get_all_employees()
         
         assert len(result) == 2
 
     @pytest.mark.asyncio
-    async def test_get_all_employees_api_error(self, ragic_service):
-        """Test handling of API errors."""
-        with patch('httpx.AsyncClient') as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(side_effect=httpx.HTTPError("Connection failed"))
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client_class.return_value = mock_client
-            
-            result = await ragic_service.get_all_employees()
+    async def test_get_all_employees_api_error(self, ragic_service, mock_async_db_session):
+        """Test handling of DB errors."""
+        mock_async_db_session.execute.side_effect = Exception("DB connection failed")
         
-        assert result == []
+        with patch('core.services.ragic.get_standalone_session', return_value=mock_async_db_session):
+            # The current implementation might raise the exception or return empty
+            # Checking implementation: it just executes query. It doesn't wrap in try-except block in get_all_employees (line 115)
+            # So it should raise
+             with pytest.raises(Exception, match="DB connection failed"):
+                await ragic_service.get_all_employees()
 
 
 class TestCoreRagicServiceSingleton:

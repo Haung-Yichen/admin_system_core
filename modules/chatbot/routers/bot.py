@@ -29,6 +29,13 @@ def create_auth_required_flex(line_user_id: str) -> dict[str, Any]:
     config_loader = ConfigLoader()
     config_loader.load()
     base_url = config_loader.get("server.base_url", "")
+    
+    # Check if base_url is set, log warning if not
+    if not base_url:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning("BASE_URL not set in configuration! Auth links will be relative and may not work in LINE.")
+
     login_url = f"{base_url}/auth/login?line_sub={line_user_id}"
 
     return {
