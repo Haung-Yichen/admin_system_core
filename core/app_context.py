@@ -33,7 +33,6 @@ from core.providers import (
     get_configuration_provider,
     get_log_service,
     get_line_client,
-    get_ragic_service,
     get_server_state,
     get_provider_registry,
 )
@@ -180,17 +179,31 @@ class AppContext:
     @property
     def ragic_service(self) -> "RagicService":
         """
-        Access the Ragic service (lazy initialization via provider).
+        Access the Ragic service.
+        
+        DEPRECATED: Use dependency injection instead.
         
         Returns:
             RagicService: The Ragic API service
             
         Note:
-            For FastAPI routes, prefer using RagicServiceDep:
+            For FastAPI routes, use RagicServiceDep:
                 from core.dependencies import RagicServiceDep
                 async def handler(ragic: RagicServiceDep): ...
+                
+            For background tasks:
+                from core.http_client import get_global_http_client
+                from core.ragic.service import RagicService
+                service = RagicService(http_client=get_global_http_client())
         """
-        return get_ragic_service()
+        warnings.warn(
+            "AppContext.ragic_service is deprecated. Use RagicServiceDep dependency injection.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        from core.http_client import get_global_http_client
+        from core.ragic.service import RagicService
+        return RagicService(http_client=get_global_http_client())
     
     # -------------------------------------------------------------------------
     # Logging (delegates to LogService)

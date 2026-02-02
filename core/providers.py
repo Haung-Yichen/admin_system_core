@@ -350,37 +350,6 @@ def get_line_client() -> "LineClient":
 
 
 # =============================================================================
-# Ragic Service Provider
-# =============================================================================
-
-class IRagicServiceProvider(Protocol):
-    """Protocol for Ragic service access."""
-    
-    def get_ragic_service(self) -> "RagicService":
-        """Get the Ragic service instance."""
-        ...
-
-
-_ragic_service_provider: Optional[ServiceProvider] = None
-
-
-def get_ragic_service_provider() -> ServiceProvider:
-    """Get the Ragic service provider."""
-    global _ragic_service_provider
-    if _ragic_service_provider is None:
-        def create_ragic_service():
-            from core.ragic import RagicService
-            return RagicService()
-        _ragic_service_provider = ServiceProvider(create_ragic_service)
-    return _ragic_service_provider
-
-
-def get_ragic_service() -> "RagicService":
-    """Get the Ragic service instance."""
-    return get_ragic_service_provider().get()
-
-
-# =============================================================================
 # Server State Provider
 # =============================================================================
 
@@ -447,7 +416,6 @@ class ProviderRegistry:
             "config": get_configuration_provider,
             "log": get_log_service,
             "line_client": get_line_client,
-            "ragic_service": get_ragic_service,
             "server_state": get_server_state,
         }
     

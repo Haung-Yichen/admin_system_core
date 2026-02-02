@@ -41,18 +41,19 @@ class TestRagicFieldConfig:
 
 
 class TestRagicService:
-    """Tests for RagicService class."""
+    """Tests for EmployeeVerificationService (RagicService alias)."""
     
     @pytest.fixture
     def ragic_service(self, mock_env_vars):
-        """Create RagicService instance."""
-        from core.services.ragic import RagicService
+        """Create EmployeeVerificationService instance."""
+        from core.services.ragic import EmployeeVerificationService
         
-        return RagicService()
+        return EmployeeVerificationService()
     
     def test_ragic_service_initialization(self, ragic_service):
-        """Test RagicService initializes correctly."""
-        assert ragic_service._base_url is not None
+        """Test EmployeeVerificationService initializes correctly."""
+        # Note: EmployeeVerificationService doesn't have _base_url
+        # It uses local database cache instead of direct Ragic API calls
         assert ragic_service._field_config is not None
     
     def test_fuzzy_match_exact(self, ragic_service):
@@ -255,14 +256,14 @@ class TestRagicService:
         # Test via private method
         assert ragic_service._get_field_value(record, email_id) == "test@example.com"
     
-    def test_get_ragic_service_singleton(self, mock_env_vars):
-        """Test get_ragic_service() returns singleton."""
-        from core.services.ragic import get_ragic_service
+    def test_get_employee_verification_service_singleton(self, mock_env_vars):
+        """Test get_employee_verification_service() returns singleton."""
+        from core.services.ragic import get_employee_verification_service
         import core.services.ragic as ragic_module
         
-        ragic_module._ragic_service = None
+        ragic_module._verification_service = None
         
-        service1 = get_ragic_service()
-        service2 = get_ragic_service()
+        service1 = get_employee_verification_service()
+        service2 = get_employee_verification_service()
         
         assert service1 is service2

@@ -25,7 +25,10 @@ from core.app_context import ConfigLoader
 from core.models import User, UsedToken
 from core.schemas.auth import UserResponse
 from core.security import generate_blind_index
-from core.services.ragic import RagicService, get_ragic_service
+from core.services.ragic import (
+    EmployeeVerificationService,
+    get_employee_verification_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -115,25 +118,25 @@ class AuthService:
 
     def __init__(
         self,
-        ragic_service: RagicService | None = None,
+        ragic_service: EmployeeVerificationService | None = None,
         config_loader: ConfigLoader | None = None,
     ) -> None:
         """
         Initialize AuthService with injectable dependencies.
 
         Args:
-            ragic_service: RagicService instance for employee verification.
-                          If None, uses global singleton.
+            ragic_service: EmployeeVerificationService instance for employee verification.
+                          If None, creates a new instance.
             config_loader: ConfigLoader instance for configuration.
                           If None, creates and loads a new instance.
 
         Note:
             For unit testing, inject mock dependencies:
-            >>> mock_ragic = Mock(spec=RagicService)
+            >>> mock_ragic = Mock(spec=EmployeeVerificationService)
             >>> mock_config = Mock(spec=ConfigLoader)
             >>> service = AuthService(ragic_service=mock_ragic, config_loader=mock_config)
         """
-        self._ragic_service = ragic_service or get_ragic_service()
+        self._ragic_service = ragic_service or get_employee_verification_service()
 
         # Use injected config loader or create new one
         if config_loader is not None:

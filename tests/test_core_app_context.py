@@ -172,19 +172,29 @@ class TestAppContext:
             assert client2 is client
     
     def test_ragic_service_lazy_init(self, mock_env_vars):
-        """Test ragic_service property lazily initializes."""
+        """Test ragic_service property lazily initializes (deprecated)."""
         from core.app_context import AppContext
+        import warnings
         
-        with patch('core.ragic.RagicService') as MockRagicService:
-            mock_instance = MagicMock()
-            MockRagicService.return_value = mock_instance
+        with patch('core.http_client.get_global_http_client') as mock_get_client:
+            mock_http_client = MagicMock()
+            mock_get_client.return_value = mock_http_client
             
-            ctx = AppContext()
-            
-            # First access creates service
-            service = ctx.ragic_service
-            MockRagicService.assert_called_once()
-            
-            # Second access returns same instance
-            service2 = ctx.ragic_service
-            assert service2 is service
+            with patch('core.ragic.service.RagicService') as MockRagicService:
+                mock_instance = MagicMock()
+                MockRagicService.return_value = mock_instance
+                
+                ctx = AppContext()
+                
+                # First access creates service (with deprecation warning)
+                with warnings.catch_warnings(record=True) as w:
+                    warnings.simplefilter("always")
+                    service = ctx.ragic_service
+                    assert len(w) == 1
+                    assert "deprecated" in str(w[0].message).lower()
+                
+                MockRagicService.assert_called_once_with(http_client=mock_http_client)
+                
+                # Second access returns new instance (no caching)
+                service2 = ctx.ragic_service
+                assert MockRagicService.call_count == 2

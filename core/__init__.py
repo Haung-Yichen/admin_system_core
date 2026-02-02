@@ -9,6 +9,16 @@ from core import database
 # LINE Client
 from core.line_client import LineClient
 
+# HTTP Client Lifecycle Management
+from core.http_client import (
+    HttpClientManager,
+    create_http_client_context,
+    get_http_client_from_app,
+    get_global_http_client,
+    set_global_http_client,
+    is_http_client_available,
+)
+
 # Dependency Injection Providers
 from core.providers import (
     ConfigurationProvider,
@@ -20,7 +30,6 @@ from core.providers import (
     get_settings,
     get_log_service,
     get_line_client,
-    get_ragic_service,
     get_server_state,
     get_provider_registry,
 )
@@ -30,6 +39,8 @@ from core.dependencies import (
     ConfigDep,
     DbSessionDep,
     LogDep,
+    HttpClientDep,
+    HttpClientOptionalDep,
     LineClientDep,
     LineClientOptionalDep,
     RagicServiceDep,
@@ -40,6 +51,8 @@ from core.dependencies import (
     get_config,
     get_db,
     get_log,
+    get_http_client,
+    get_http_client_optional,
     get_line,
     get_ragic,
     get_server,
@@ -65,16 +78,27 @@ __all__ = [
     "setup_logging", "database",
     # LINE Client
     "LineClient",
+    # HTTP Client Lifecycle Management
+    "HttpClientManager",
+    "create_http_client_context",
+    "get_http_client_from_app",
+    "get_global_http_client",
+    "set_global_http_client",
+    "is_http_client_available",
     # New DI exports
     "IModuleContext", "get_app_context", "IConfigurable", "ILoggable", "ModuleContext",
     "ConfigurationProvider", "LogService", "ServerState", "ServiceProvider", "ProviderRegistry",
     "get_configuration_provider", "get_settings", "get_log_service",
-    "get_line_client", "get_ragic_service", "get_server_state", "get_provider_registry",
+    "get_line_client", "get_server_state", "get_provider_registry",
     # FastAPI Dependencies
-    "ConfigDep", "DbSessionDep", "LogDep", "LineClientDep", "LineClientOptionalDep",
+    "ConfigDep", "DbSessionDep", "LogDep",
+    "HttpClientDep", "HttpClientOptionalDep",
+    "LineClientDep", "LineClientOptionalDep",
     "RagicServiceDep", "RagicServiceOptionalDep", "ServerStateDep",
     "CoreServicesDep", "RequestContextDep",
-    "get_config", "get_db", "get_log", "get_line", "get_ragic", "get_server",
+    "get_config", "get_db", "get_log",
+    "get_http_client", "get_http_client_optional",
+    "get_line", "get_ragic", "get_server",
     "get_core_services", "get_request_context",
     # LINE Auth
     "LineAuthMessages", "VerifiedUser", "line_auth_check",

@@ -19,22 +19,23 @@ import httpx
 # =============================================================================
 
 class TestCoreRagicServiceInit:
-    """Tests for core RagicService initialization."""
+    """Tests for core EmployeeVerificationService initialization."""
 
     def test_init_loads_config(self, mock_env_vars):
         """Test service initializes with config."""
-        from core.services.ragic import RagicService
+        from core.services.ragic import EmployeeVerificationService
         
-        service = RagicService()
+        service = EmployeeVerificationService()
         
-        assert service._base_url == "https://ap13.ragic.com"
-        assert service._api_key == "test-ragic-key"
+        # Note: EmployeeVerificationService doesn't have _base_url or _api_key
+        # It uses local database cache instead of direct Ragic API calls
+        assert service._field_config is not None
 
     def test_field_config_loaded(self, mock_env_vars):
         """Test field configuration is loaded."""
-        from core.services.ragic import RagicService
+        from core.services.ragic import EmployeeVerificationService
         
-        service = RagicService()
+        service = EmployeeVerificationService()
         
         assert service._field_config is not None
         assert service._field_config.email_id is not None
@@ -45,9 +46,9 @@ class TestCoreRagicServiceFieldMatching:
 
     @pytest.fixture
     def ragic_service(self, mock_env_vars):
-        """Create RagicService instance."""
-        from core.services.ragic import RagicService
-        return RagicService()
+        """Create EmployeeVerificationService instance."""
+        from core.services.ragic import EmployeeVerificationService
+        return EmployeeVerificationService()
 
     def test_get_field_value_exact_match(self, ragic_service):
         """Test exact field ID matching."""
@@ -102,9 +103,9 @@ class TestCoreRagicServiceEmployeeVerification:
 
     @pytest.fixture
     def ragic_service(self, mock_env_vars):
-        """Create RagicService instance."""
-        from core.services.ragic import RagicService
-        return RagicService()
+        """Create EmployeeVerificationService instance."""
+        from core.services.ragic import EmployeeVerificationService
+        return EmployeeVerificationService()
 
     @pytest.mark.asyncio
     async def test_verify_email_exists_found(
@@ -233,14 +234,14 @@ class TestCoreRagicServiceEmployeeVerification:
 class TestCoreRagicServiceSingleton:
     """Tests for singleton pattern."""
 
-    def test_get_ragic_service_returns_singleton(self, mock_env_vars):
+    def test_get_employee_verification_service_returns_singleton(self, mock_env_vars):
         """Test singleton returns same instance."""
         import core.services.ragic as ragic_module
-        ragic_module._ragic_service = None
+        ragic_module._verification_service = None
         
-        from core.services.ragic import get_ragic_service
+        from core.services.ragic import get_employee_verification_service
         
-        service1 = get_ragic_service()
-        service2 = get_ragic_service()
+        service1 = get_employee_verification_service()
+        service2 = get_employee_verification_service()
         
         assert service1 is service2

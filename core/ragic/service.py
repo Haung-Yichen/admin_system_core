@@ -5,6 +5,19 @@ Low-level HTTP client for Ragic API communication.
 This is the unified service that replaces both:
 - core/services/ragic.py (employee verification)
 - services/ragic_service.py (generic CRUD)
+
+Lifecycle Management:
+    RagicService requires httpx.AsyncClient via dependency injection.
+    The HTTP client is managed by FastAPI's lifespan events.
+    
+    Usage in FastAPI routes:
+        @router.get("/data")
+        async def get_data(ragic: RagicServiceDep):
+            return await ragic.get_records("/forms/1")
+    
+    Usage in background tasks:
+        from core.http_client import get_global_http_client
+        service = RagicService(http_client=get_global_http_client())
 """
 
 import logging
@@ -25,17 +38,28 @@ class RagicService:
     Higher-level operations should use RagicRepository.
     
     Args:
+        http_client: Shared httpx.AsyncClient (required).
         api_key: Ragic API key. If not provided, loads from config.
         base_url: Ragic base URL. If not provided, loads from config.
-        timeout: HTTP request timeout in seconds.
+        timeout: HTTP request timeout in seconds (for per-request override).
     """
     
     def __init__(
         self,
+        http_client: httpx.AsyncClient,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         timeout: float = 30.0,
     ) -> None:
+        if http_client is None:
+            raise ValueError(
+                "http_client is required. Use dependency injection via RagicServiceDep "
+                "or get_global_http_client() for background tasks."
+            )
+        
+        self._client = http_client
+        self._timeout = timeout
+        
         # Load from config if not provided
         if not api_key or not base_url:
             config = ConfigLoader()
@@ -47,58 +71,13 @@ class RagicService:
         else:
             self._api_key = api_key
             self._base_url = base_url.rstrip("/")
-        
-        self._timeout = timeout
-        self._client: Optional[httpx.AsyncClient] = None
-        self._client_loop_id: Optional[int] = None  # Track which event loop the client belongs to
     
-    def _get_client(self) -> httpx.AsyncClient:
-        """Get or create the HTTP client.
-        
-        Handles event loop lifecycle - if the previous event loop was closed
-        or we're in a different event loop, creates a new client.
-        """
-        import asyncio
-        
-        # Get current event loop id
-        try:
-            current_loop = asyncio.get_running_loop()
-            current_loop_id = id(current_loop)
-        except RuntimeError:
-            # No running loop - this shouldn't happen in async context
-            # but handle gracefully
-            current_loop_id = None
-        
-        # Check if we need a new client:
-        # 1. No client exists
-        # 2. Client was created for a different event loop
-        # 3. Client appears to be closed/invalid
-        need_new_client = (
-            self._client is None or
-            self._client_loop_id != current_loop_id or
-            (self._client is not None and self._client.is_closed)
-        )
-        
-        if need_new_client:
-            # Don't try to close old client - it's bound to a dead loop
-            # Just discard the reference and let GC handle it
-            self._client = httpx.AsyncClient(
-                timeout=self._timeout,
-                headers={
-                    "Authorization": f"Basic {self._api_key}",
-                    "Content-Type": "application/json",
-                },
-            )
-            self._client_loop_id = current_loop_id
-            logger.debug(f"Created new httpx client for event loop {current_loop_id}")
-        
-        return self._client
-    
-    async def close(self) -> None:
-        """Close the HTTP client."""
-        if self._client is not None:
-            await self._client.aclose()
-            self._client = None
+    def _get_headers(self) -> Dict[str, str]:
+        """Get headers for Ragic API requests."""
+        return {
+            "Authorization": f"Basic {self._api_key}",
+            "Content-Type": "application/json",
+        }
     
     def is_configured(self) -> bool:
         """Check if the service is properly configured."""
@@ -142,13 +121,14 @@ class RagicService:
         
         try:
             start_time = time.time()
-            client = self._get_client()
+            client = self._client
             
             # Use a lightweight request - fetch API info or a small dataset
             # Ragic doesn't have a dedicated health endpoint, so we try to access the base
             response = await client.get(
                 self._base_url,
                 params={"api": ""},
+                headers=self._get_headers(),
                 timeout=10.0
             )
             
@@ -250,8 +230,8 @@ class RagicService:
         url = full_url if full_url else self._build_url(sheet_path)
         
         try:
-            client = self._get_client()
-            response = await client.get(url, params={"info": "1"})
+            client = self._client
+            response = await client.get(url, params={"info": "1"}, headers=self._get_headers())
             response.raise_for_status()
             return response.json()
             
@@ -287,8 +267,8 @@ class RagicService:
         query_params = params or {}
         
         try:
-            client = self._get_client()
-            response = await client.get(full_url, params=query_params)
+            client = self._client
+            response = await client.get(full_url, params=query_params, headers=self._get_headers())
             response.raise_for_status()
             
             data = response.json()
@@ -352,8 +332,8 @@ class RagicService:
                 params[f"where_{field_id}"] = value
         
         try:
-            client = self._get_client()
-            response = await client.get(url, params=params)
+            client = self._client
+            response = await client.get(url, params=params, headers=self._get_headers())
             response.raise_for_status()
             
             data = response.json()
@@ -391,8 +371,8 @@ class RagicService:
         url = self._build_url(sheet_path, record_id)
         
         try:
-            client = self._get_client()
-            response = await client.get(url, params={"api": "", "naming": "EID"})
+            client = self._client
+            response = await client.get(url, params={"api": "", "naming": "EID"}, headers=self._get_headers())
             response.raise_for_status()
             return response.json()
             
@@ -421,8 +401,8 @@ class RagicService:
         url = self._build_url(sheet_path)
         
         try:
-            client = self._get_client()
-            response = await client.post(url, params={"api": ""}, json=data)
+            client = self._client
+            response = await client.post(url, params={"api": ""}, json=data, headers=self._get_headers())
             response.raise_for_status()
             
             result = response.json()
@@ -459,8 +439,8 @@ class RagicService:
         url = self._build_url(sheet_path, record_id)
         
         try:
-            client = self._get_client()
-            response = await client.post(url, params={"api": ""}, json=data)
+            client = self._client
+            response = await client.post(url, params={"api": ""}, json=data, headers=self._get_headers())
             response.raise_for_status()
             
             logger.debug(f"Record {record_id} updated successfully")
@@ -468,6 +448,7 @@ class RagicService:
             
         except Exception as e:
             logger.error(f"Failed to update record {record_id}: {e}")
+            return False
             return False
     
     async def delete_record(
@@ -491,8 +472,8 @@ class RagicService:
         url = self._build_url(sheet_path, record_id)
         
         try:
-            client = self._get_client()
-            response = await client.delete(url, params={"api": ""})
+            client = self._client
+            response = await client.delete(url, params={"api": ""}, headers=self._get_headers())
             response.raise_for_status()
             
             logger.debug(f"Record {record_id} deleted successfully")
@@ -529,8 +510,8 @@ class RagicService:
             return None
         
         try:
-            client = self._get_client()
-            response = await client.post(full_url, json=data)
+            client = self._client
+            response = await client.post(full_url, json=data, headers=self._get_headers())
             response.raise_for_status()
             
             result = response.json()
@@ -545,27 +526,23 @@ class RagicService:
             return None
 
 
-# =============================================================================
-# Singleton Access
-# =============================================================================
-
-_ragic_service: Optional[RagicService] = None
-
-
-def get_ragic_service() -> RagicService:
+def create_ragic_service(http_client: httpx.AsyncClient) -> RagicService:
     """
-    Get singleton instance of RagicService.
+    Factory function to create RagicService with HTTP client.
+    
+    Use this for background tasks where dependency injection isn't available.
+    
+    Args:
+        http_client: Shared HTTP client from get_global_http_client().
     
     Returns:
         RagicService instance.
+    
+    Example:
+        from core.http_client import get_global_http_client
+        from core.ragic.service import create_ragic_service
+        
+        service = create_ragic_service(get_global_http_client())
     """
-    global _ragic_service
-    if _ragic_service is None:
-        _ragic_service = RagicService()
-    return _ragic_service
+    return RagicService(http_client=http_client)
 
-
-def reset_ragic_service() -> None:
-    """Reset the singleton instance (for testing)."""
-    global _ragic_service
-    _ragic_service = None

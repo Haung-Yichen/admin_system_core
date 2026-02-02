@@ -38,13 +38,12 @@ from core.ragic.service_factory import (
     BaseStrategyHandler,
     RepositoryHandler,
     get_ragic_service_factory,
-    create_ragic_service,
 )
 
 # Core ORM components
 from core.ragic.fields import RagicField
 from core.ragic.models import RagicModel
-from core.ragic.service import RagicService, get_ragic_service
+from core.ragic.service import RagicService, create_ragic_service
 from core.ragic.repository import RagicRepository
 
 # Legacy column config (deprecated - use RagicRegistry instead)
@@ -97,7 +96,6 @@ __all__ = [
     "RagicModel",
     "RagicService",
     "RagicRepository",
-    "get_ragic_service",
     # === Legacy column config (deprecated) ===
     "RagicFormConfig",
     "get_form_config",

@@ -29,7 +29,6 @@ from core.providers import (
     get_configuration_provider,
     get_log_service,
     get_line_client,
-    get_ragic_service,
     get_server_state,
     ServerState,
 )
@@ -41,6 +40,7 @@ from core.security.webhook import (
 )
 
 if TYPE_CHECKING:
+    import httpx
     from core.line_client import LineClient
     from core.ragic import RagicService
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -169,23 +169,93 @@ LineClientOptionalDep = Annotated["LineClient | None", Depends(get_line_optional
 
 
 # =============================================================================
+# HTTP Client Dependencies
+# =============================================================================
+
+def get_http_client(request: Request) -> "httpx.AsyncClient":
+    """
+    FastAPI dependency for shared HTTP client.
+    
+    Gets the HTTP client from app.state, which is managed by lifespan events.
+    
+    Args:
+        request: FastAPI request object.
+    
+    Returns:
+        httpx.AsyncClient: The shared HTTP client.
+    
+    Raises:
+        RuntimeError: If HTTP client is not available.
+    """
+    import httpx
+    if not hasattr(request.app.state, "http_client"):
+        raise RuntimeError(
+            "HTTP client not available. Ensure lifespan context is properly configured."
+        )
+    client = request.app.state.http_client
+    if client is None or client.is_closed:
+        raise RuntimeError("HTTP client is not running.")
+    return client
+
+
+# Type alias for dependency injection
+HttpClientDep = Annotated["httpx.AsyncClient", Depends(get_http_client)]
+
+
+def get_http_client_optional(request: Request) -> "httpx.AsyncClient | None":
+    """
+    FastAPI dependency for optional HTTP client.
+    
+    Returns None if HTTP client is not available (e.g., during testing).
+    
+    Args:
+        request: FastAPI request object.
+    
+    Returns:
+        httpx.AsyncClient or None if not available.
+    """
+    import httpx
+    if not hasattr(request.app.state, "http_client"):
+        return None
+    client = request.app.state.http_client
+    if client is None or client.is_closed:
+        return None
+    return client
+
+
+HttpClientOptionalDep = Annotated["httpx.AsyncClient | None", Depends(get_http_client_optional)]
+
+
+# =============================================================================
 # Ragic Service Dependencies
 # =============================================================================
 
-def get_ragic() -> "RagicService":
+def get_ragic(request: Request) -> "RagicService":
     """
     FastAPI dependency for Ragic service.
     
+    Injects the shared HTTP client into RagicService for proper
+    lifecycle management.
+    
+    Args:
+        request: FastAPI request object.
+    
     Returns:
-        RagicService: The Ragic API service
+        RagicService: The Ragic API service with shared HTTP client.
         
     Raises:
-        RuntimeError: If Ragic is not configured
+        RuntimeError: If Ragic is not configured.
     """
+    from core.ragic import RagicService
+    
     config = get_configuration_provider()
     if not config.is_ragic_configured():
         raise RuntimeError("Ragic is not configured. Check environment variables.")
-    return get_ragic_service()
+    
+    # Get shared HTTP client from app state
+    http_client = get_http_client_optional(request)
+    
+    return RagicService(http_client=http_client)
 
 
 # Type alias for dependency injection
@@ -193,17 +263,26 @@ RagicServiceDep = Annotated["RagicService", Depends(get_ragic)]
 
 
 # Optional Ragic service
-def get_ragic_optional() -> "RagicService | None":
+def get_ragic_optional(request: Request) -> "RagicService | None":
     """
     FastAPI dependency for optional Ragic service.
     
+    Args:
+        request: FastAPI request object.
+    
     Returns:
-        RagicService or None if not configured
+        RagicService or None if not configured.
     """
+    from core.ragic import RagicService
+    
     config = get_configuration_provider()
     if not config.is_ragic_configured():
         return None
-    return get_ragic_service()
+    
+    # Get shared HTTP client from app state
+    http_client = get_http_client_optional(request)
+    
+    return RagicService(http_client=http_client)
 
 
 RagicServiceOptionalDep = Annotated["RagicService | None", Depends(get_ragic_optional)]

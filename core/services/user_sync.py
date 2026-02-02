@@ -29,9 +29,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import get_thread_local_session
 from core.models import User
 from core.ragic import get_user_form
-from core.ragic.service import RagicService, get_ragic_service
+from core.ragic.service import RagicService, create_ragic_service
 from core.ragic.sync_base import BaseRagicSyncService, SyncResult
 from core.security import generate_blind_index
+from core.http_client import get_global_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -272,7 +273,7 @@ class UserSyncService(BaseRagicSyncService[User]):
         
         try:
             # Fetch all records from Ragic
-            records = await self._ragic_service.get_records_by_url(
+            records = await self._get_ragic_service().get_records_by_url(
                 form_url,
                 params={"naming": "EID"}
             )
@@ -623,8 +624,14 @@ class UserRagicWriter:
     """
     
     def __init__(self, ragic_service: Optional[RagicService] = None) -> None:
-        self._ragic_service = ragic_service or get_ragic_service()
+        self._ragic_service_instance = ragic_service
         self._form_config = get_user_form()
+    
+    def _get_ragic_service(self) -> RagicService:
+        """Lazy initialization of RagicService."""
+        if self._ragic_service_instance is None:
+            self._ragic_service_instance = create_ragic_service(get_global_http_client())
+        return self._ragic_service_instance
     
     async def create_user_in_ragic(
         self,
@@ -666,7 +673,7 @@ class UserRagicWriter:
         logger.info(f"Creating user in Ragic (local_id: {local_db_id})")
         
         try:
-            result = await self._ragic_service.create_record_by_url(
+            result = await self._get_ragic_service().create_record_by_url(
                 self._form_config.url,
                 payload.to_ragic_dict(),
             )
@@ -735,7 +742,7 @@ class UserRagicWriter:
         logger.info(f"Updating user in Ragic: ragic_id={ragic_id}")
         
         try:
-            success = await self._ragic_service.update_record(
+            success = await self._get_ragic_service().update_record(
                 self._form_config.sheet_path,
                 ragic_id,
                 payload.to_ragic_dict(),
@@ -766,7 +773,7 @@ class UserRagicWriter:
         """
         try:
             # Ragic filter by key field (line_user_id)
-            records = await self._ragic_service.get_records(
+            records = await self._get_ragic_service().get_records(
                 self._form_config.sheet_path,
                 filters={Fields.LINE_USER_ID: line_user_id},
                 limit=1,

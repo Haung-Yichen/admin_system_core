@@ -23,6 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_standalone_session
 from core.ragic import RagicService
+from core.ragic.service import create_ragic_service
+from core.http_client import get_global_http_client
 from core.security import generate_blind_index
 from modules.administrative.core.config import (
     AdminSettings,
@@ -79,20 +81,31 @@ class LeaveService:
         """
         self._settings = settings or get_admin_settings()
         
-        # Use framework's RagicService for all Ragic API operations
-        self._ragic_service = RagicService(
-            api_key=self._settings.ragic_api_key.get_secret_value(),
-            timeout=float(self._settings.sync_timeout_seconds),
-        )
+        # Lazy initialization - RagicService will be created on first use
+        self._ragic_service: RagicService | None = None
         
         # Schema cache for form validation
         self._form_schema_cache: dict[str, Any] | None = None
         self._schema_cache_time: float = 0
         self._schema_cache_ttl: int = 300  # 5 minutes cache
+    
+    def _get_ragic_service(self) -> RagicService:
+        """Get or create RagicService with lazy initialization."""
+        if self._ragic_service is None:
+            self._ragic_service = create_ragic_service(
+                http_client=get_global_http_client(),
+                api_key=self._settings.ragic_api_key.get_secret_value(),
+                timeout=float(self._settings.sync_timeout_seconds),
+            )
+        return self._ragic_service
 
     async def close(self) -> None:
-        """Close the Ragic service HTTP client."""
-        await self._ragic_service.close()
+        """Close the Ragic service HTTP client.
+        
+        Note: With shared HTTP client, this is a no-op.
+        The client lifecycle is managed by the application lifespan.
+        """
+        pass  # Shared client - no cleanup needed
 
     # =========================================================================
     # Account Profile Lookup
@@ -252,7 +265,7 @@ class LeaveService:
             
         try:
             logger.info(f"Fetching Ragic form schema from {self._settings.ragic_url_leave}")
-            self._form_schema_cache = await self._ragic_service.get_form_schema(
+            self._form_schema_cache = await self._get_ragic_service().get_form_schema(
                 full_url=self._settings.ragic_url_leave
             )
             self._schema_cache_time = current_time
@@ -679,7 +692,7 @@ class LeaveService:
             )
             
             # Use framework's RagicService for submission
-            result = await self._ragic_service.create_record_by_url(
+            result = await self._get_ragic_service().create_record_by_url(
                 full_url=self._settings.ragic_url_leave,
                 data=ragic_payload,
             )

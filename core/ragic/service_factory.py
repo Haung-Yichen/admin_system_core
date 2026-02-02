@@ -16,7 +16,8 @@ from core.ragic.enums import SyncStrategy
 from core.ragic.exceptions import RagicConfigurationError
 from core.ragic.registry import RagicRegistry, get_ragic_registry
 from core.ragic.registry_models import FormConfig
-from core.ragic.service import RagicService, get_ragic_service
+from core.ragic.service import RagicService, create_ragic_service
+from core.http_client import get_global_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +40,11 @@ class BaseStrategyHandler(ABC, Generic[T]):
     def __init__(
         self,
         form_config: FormConfig,
-        ragic_service: Optional[RagicService] = None,
+        ragic_service: RagicService,
         registry: Optional[RagicRegistry] = None,
     ) -> None:
         self._form_config = form_config
-        self._ragic_service = ragic_service or get_ragic_service()
+        self._ragic_service = ragic_service
         self._registry = registry or get_ragic_registry()
     
     @property
@@ -251,7 +252,7 @@ class GenericRagicService:
         
         Args:
             form_key: The form key from ragic_registry.json.
-            ragic_service: Optional RagicService instance.
+            ragic_service: RagicService instance (required).
             registry: Optional RagicRegistry instance.
         
         Raises:
@@ -259,7 +260,7 @@ class GenericRagicService:
         """
         self._registry = registry or get_ragic_registry()
         self._form_config = self._registry.get_form_config(form_key)
-        self._ragic_service = ragic_service or get_ragic_service()
+        self._ragic_service = ragic_service
         self._handler = self._create_handler()
     
     def _create_handler(self) -> BaseStrategyHandler:
@@ -444,13 +445,12 @@ class RagicServiceFactory:
         
         Args:
             form_key: The form key.
-            ragic_service: Optional RagicService instance.
+            ragic_service: RagicService instance (required).
         
         Returns:
             Strategy handler instance.
         """
         form_config = self._registry.get_form_config(form_key)
-        ragic_service = ragic_service or get_ragic_service()
         
         strategy = form_config.sync_strategy
         
@@ -509,14 +509,18 @@ def get_ragic_service_factory() -> RagicServiceFactory:
     return _factory
 
 
-def create_ragic_service(form_key: str) -> GenericRagicService:
+def create_form_service(form_key: str) -> GenericRagicService:
     """
-    Convenience function to create a service for a form.
+    Convenience function to create a GenericRagicService for a form.
+    
+    Uses the global HTTP client for the underlying RagicService.
     
     Args:
-        form_key: The form key.
+        form_key: The form key from ragic_registry.json.
     
     Returns:
         Configured GenericRagicService.
     """
-    return get_ragic_service_factory().create(form_key)
+    http_client = get_global_http_client()
+    ragic_service = create_ragic_service(http_client)
+    return GenericRagicService(form_key, ragic_service=ragic_service)

@@ -44,7 +44,7 @@ class TestAuthServiceEmail:
         """Create AuthService instance with mocked dependencies."""
         from core.services import auth as auth_module
         
-        with patch.object(auth_module, 'get_ragic_service') as mock_ragic:
+        with patch.object(auth_module, 'get_employee_verification_service') as mock_ragic:
             mock_ragic.return_value = MagicMock()
             service = auth_module.AuthService()
             yield service
@@ -118,7 +118,7 @@ class TestAuthServiceEmail:
         """Test that email service uses config values."""
         from core.services import auth as auth_module
         
-        with patch.object(auth_module, 'get_ragic_service') as mock_ragic:
+        with patch.object(auth_module, 'get_employee_verification_service') as mock_ragic:
             mock_ragic.return_value = MagicMock()
             service = auth_module.AuthService()
             

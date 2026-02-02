@@ -22,7 +22,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import Base, get_thread_local_session
-from core.ragic.service import RagicService, get_ragic_service
+from core.ragic.service import RagicService, create_ragic_service
+from core.http_client import get_global_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +108,8 @@ class BaseRagicSyncService(ABC, Generic[ModelT]):
         form_key: Optional[str] = None,
     ) -> None:
         self._model_class = model_class
-        self._ragic_service = ragic_service or get_ragic_service()
+        # Lazy initialization - service created on first use if not provided
+        self._ragic_service = ragic_service
         self._form_key = form_key
         self._registry = None
         
@@ -118,6 +120,18 @@ class BaseRagicSyncService(ABC, Generic[ModelT]):
             self._form_config = self._registry.get_form_config(form_key)
         else:
             self._form_config = None
+    
+    def _get_ragic_service(self) -> RagicService:
+        """
+        Get a RagicService instance for the current event loop.
+        
+        NOTE: Does not cache the service because different event loops
+        (main thread vs background sync thread) require different HTTP clients.
+        Each call creates a new service using the appropriate client for
+        the current execution context.
+        """
+        http_client = get_global_http_client()
+        return create_ragic_service(http_client)
         
     @abstractmethod
     async def map_record_to_dict(self, record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -194,11 +208,6 @@ class BaseRagicSyncService(ABC, Generic[ModelT]):
         """
         pass
     
-    async def close(self) -> None:
-        """Cleanup resources."""
-        if self._ragic_service:
-            await self._ragic_service.close()
-    
     # =========================================================================
     # Sync Operations
     # =========================================================================
@@ -226,7 +235,8 @@ class BaseRagicSyncService(ABC, Generic[ModelT]):
         
         try:
             # Fetch all records from Ragic (with naming=EID to get field IDs)
-            records = await self._ragic_service.get_records_by_url(
+            ragic_service = self._get_ragic_service()
+            records = await ragic_service.get_records_by_url(
                 form_url, 
                 params={"naming": "EID"}
             )
@@ -298,7 +308,8 @@ class BaseRagicSyncService(ABC, Generic[ModelT]):
         
         try:
             # Fetch the record
-            record = await self._ragic_service.get_record(sheet_path, ragic_id)
+            ragic_service = self._get_ragic_service()
+            record = await ragic_service.get_record(sheet_path, ragic_id)
             
             if not record:
                 logger.warning(f"Record {ragic_id} not found in Ragic")
@@ -576,8 +587,21 @@ class RagicSyncManager:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
+            # Create a new HTTP client for this thread's event loop
+            # Cannot reuse the global client as it's bound to the main event loop
+            import httpx
+            http_client = httpx.AsyncClient(
+                timeout=30.0,
+                limits=httpx.Limits(max_connections=50, max_keepalive_connections=20),
+            )
+            
+            # Set this client as the global client for this thread
+            from core.http_client import set_global_http_client
+            set_global_http_client(http_client)
+            
             try:
                 logger.info("Starting background sync for all services...")
+                
                 results = loop.run_until_complete(self.sync_all(auto_only=True))
                 
                 for key, result in results.items():
@@ -590,6 +614,12 @@ class RagicSyncManager:
                 logger.exception(f"Background sync failed: {e}")
                 
             finally:
+                # Cleanup HTTP client
+                try:
+                    loop.run_until_complete(http_client.aclose())
+                except Exception as e:
+                    logger.warning(f"Error closing HTTP client: {e}")
+                
                 # Cleanup thread-local database engine
                 from core.database import dispose_thread_local_engine
                 try:

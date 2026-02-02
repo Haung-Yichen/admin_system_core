@@ -21,6 +21,10 @@ from fastapi.staticfiles import StaticFiles
 
 from core.app_context import AppContext
 from core.database import close_db_connections, init_database
+from core.http_client import (
+    create_http_client_context,
+    set_global_http_client,
+)
 from core.logging_config import setup_logging
 from core.registry import ModuleLoader, ModuleRegistry
 from core.server import create_base_app, set_registry
@@ -141,50 +145,61 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     FastAPI lifespan context manager.
 
     Handles startup and shutdown events.
+    Properly manages HTTP client lifecycle via dependency injection.
     """
     logger = logging.getLogger(__name__)
 
     # Startup
     logger.info("Starting Admin System Core...")
 
-    try:
-        await init_database()
-        logger.info("Database initialized")
-    except Exception as e:
-        logger.error(f"Database initialization failed: {e}")
-        raise
+    # Initialize HTTP client with proper lifecycle management
+    # This replaces the singleton pattern in RagicService
+    async with create_http_client_context(app, timeout=30.0, max_connections=100) as http_manager:
+        # Make HTTP client available globally for background tasks
+        set_global_http_client(http_manager.client)
+        logger.info("HTTP client initialized")
 
-    # Register core sync services (User Identity Ragic sync)
-    _register_core_sync_services()
-    logger.info("Core sync services registered")
+        try:
+            await init_database()
+            logger.info("Database initialized")
+        except Exception as e:
+            logger.error(f"Database initialization failed: {e}")
+            raise
 
-    # Start background sync for all registered Ragic services
-    from core.ragic import get_sync_manager
-    sync_manager = get_sync_manager()
-    sync_manager.start_background_sync()
-    logger.info("Ragic sync manager started")
+        # Register core sync services (User Identity Ragic sync)
+        _register_core_sync_services()
+        logger.info("Core sync services registered")
 
-    # Call async_startup on all modules (event loop is now running)
-    if _registry:
-        await _registry.async_startup_all()
-        logger.info("Module async startup completed")
+        # Start background sync for all registered Ragic services
+        from core.ragic import get_sync_manager
+        sync_manager = get_sync_manager()
+        sync_manager.start_background_sync()
+        logger.info("Ragic sync manager started")
 
-    # Update server status
-    context = _context
-    if context:
-        context.set_server_status(True, context.config.get("server.port", 8000))
-        context.log_event("Application started successfully", "SUCCESS")
+        # Call async_startup on all modules (event loop is now running)
+        if _registry:
+            await _registry.async_startup_all()
+            logger.info("Module async startup completed")
 
-    yield
+        # Update server status
+        context = _context
+        if context:
+            context.set_server_status(True, context.config.get("server.port", 8000))
+            context.log_event("Application started successfully", "SUCCESS")
 
-    # Shutdown
-    logger.info("Shutting down Admin System Core...")
+        yield
 
-    if _registry:
-        _registry.shutdown_all()
+        # Shutdown
+        logger.info("Shutting down Admin System Core...")
 
-    await close_db_connections()
-    logger.info("Cleanup complete")
+        # Clear global HTTP client reference before closing
+        set_global_http_client(None)
+
+        if _registry:
+            _registry.shutdown_all()
+
+        await close_db_connections()
+        logger.info("Cleanup complete")
 
 
 # -----------------------------------------------------------------------------

@@ -4,7 +4,12 @@ Core Services Package.
 Provides framework-level services used by all modules.
 """
 
-from core.services.ragic import RagicService, get_ragic_service
+from core.services.ragic import (
+    RagicService,
+    EmployeeVerificationService,
+    RagicFieldConfig,
+    get_employee_verification_service,
+)
 from core.services.auth import (
     AuthService,
     AuthError,
@@ -42,7 +47,11 @@ from core.services.user_sync import (
 __all__ = [
     # Ragic
     "RagicService",
-    "get_ragic_service",
+    # Ragic / Employee Verification
+    "RagicService",
+    "EmployeeVerificationService",
+    "RagicFieldConfig",
+    "get_employee_verification_service",
     # Auth
     "AuthService",
     "AuthError",

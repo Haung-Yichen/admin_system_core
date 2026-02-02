@@ -8,8 +8,10 @@ similar to SQLAlchemy's Session/Repository pattern.
 import logging
 from typing import Any, Dict, Generic, List, Optional, Type, TypeVar
 
+import httpx
+
 from core.ragic.models import RagicModel
-from core.ragic.service import RagicService, get_ragic_service
+from core.ragic.service import RagicService
 
 logger = logging.getLogger(__name__)
 
@@ -39,17 +41,17 @@ class RagicRepository(Generic[T]):
     def __init__(
         self,
         model_cls: Type[T],
-        service: Optional[RagicService] = None,
+        service: RagicService,
     ) -> None:
         """
         Initialize repository.
         
         Args:
             model_cls: The RagicModel subclass to work with.
-            service: Optional RagicService instance. Uses singleton if not provided.
+            service: RagicService instance (required).
         """
         self._model_cls = model_cls
-        self._service = service or get_ragic_service()
+        self._service = service
     
     @property
     def sheet_path(self) -> str:

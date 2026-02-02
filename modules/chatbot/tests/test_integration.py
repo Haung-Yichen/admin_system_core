@@ -91,9 +91,9 @@ class TestRagicAPIConnectivity:
         RAGIC-01: Verify Ragic API can read /HSIBAdmSys/-3/4 employee sheet.
         Expects: 150+ employee records.
         """
-        from core.services.ragic import get_ragic_service
+        from core.services.ragic import get_employee_verification_service
 
-        service = get_ragic_service()
+        service = get_employee_verification_service()
         employees = await service.get_all_employees()
 
         print(f"")
@@ -115,9 +115,9 @@ class TestRagicAPIConnectivity:
     @pytest.mark.asyncio
     async def test_ragic_field_parsing(self):
         """RAGIC-02: Verify Ragic field parsing (email, name, door_access_id)."""
-        from core.services.ragic import get_ragic_service
+        from core.services.ragic import get_employee_verification_service
 
-        service = get_ragic_service()
+        service = get_employee_verification_service()
         employees = await service.get_all_employees()
 
         if not employees:

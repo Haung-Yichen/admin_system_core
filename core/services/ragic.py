@@ -1,18 +1,11 @@
 """
-Core Ragic Service (Legacy Compatibility Layer).
+Employee Verification Service.
 
-This module now wraps the unified core/ragic package.
-For new code, prefer using core.ragic directly:
+Provides employee verification against the local database cache.
+The cache is synced from Ragic by AccountSyncService on application startup.
 
-    from core.ragic import RagicService, RagicRepository, RagicModel, RagicField
-
-This file is kept for backward compatibility with existing code that imports:
-    from core.services.ragic import RagicService, get_ragic_service
-
-IMPORTANT: Employee lookup methods (verify_email_exists, get_employee_by_id)
-now use the local database cache (administrative_accounts table) instead of
-hitting the Ragic API directly. This improves performance and consistency.
-The cache is synced from Ragic on application startup by AccountSyncService.
+NOTE: This service does NOT make direct Ragic API calls.
+All lookups are against the local administrative_accounts table.
 """
 
 import logging
@@ -20,14 +13,9 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database.session import get_standalone_session
 from core.schemas.auth import RagicEmployeeData
-
-# Re-export from new location for compatibility
-from core.ragic.service import RagicService as BaseRagicService
-from core.ragic.service import get_ragic_service as _get_ragic_service_base
 
 logger = logging.getLogger(__name__)
 
@@ -55,24 +43,21 @@ class RagicFieldConfig:
         self.door_access_names = ["員工編號", "employee_id", "EmployeeId", "門禁編號"]
 
 
-class RagicService(BaseRagicService):
+class EmployeeVerificationService:
     """
-    Employee verification service (extends unified RagicService).
+    Employee verification service using local database cache.
     
-    This class adds employee-specific methods on top of the base CRUD service.
-    Uses fuzzy field name matching to handle Chinese field names.
+    Uses the administrative_accounts table which is synced from Ragic
+    on application startup by AccountSyncService.
     """
     
     def __init__(self) -> None:
-        # Initialize base service
-        super().__init__()
-        
-        # Load config from centralized ragic_columns.json
-        from core.ragic.columns import get_account_form
-        account = get_account_form()
-        
-        self._sheet_path = account.sheet_path
         self._field_config = RagicFieldConfig()
+    
+    @staticmethod
+    def _fuzzy_match(s1: str, s2: str, threshold: float = 0.8) -> bool:
+        """Check if two strings match with fuzzy threshold."""
+        return SequenceMatcher(None, s1.lower(), s2.lower()).ratio() >= threshold
     
     def _get_field_value(
         self,
@@ -107,10 +92,6 @@ class RagicService(BaseRagicService):
                         return str(value).strip() or None
         
         return None
-    
-    def _fuzzy_match(self, s1: str, s2: str, threshold: float = 0.8) -> bool:
-        """Check if two strings match with fuzzy threshold."""
-        return SequenceMatcher(None, s1.lower(), s2.lower()).ratio() >= threshold
     
     async def get_all_employees(self) -> list[dict[str, Any]]:
         """
@@ -233,13 +214,16 @@ class RagicService(BaseRagicService):
         )
 
 
+# Alias for backward compatibility
+RagicService = EmployeeVerificationService
+
 # Singleton instance
-_ragic_service: RagicService | None = None
+_verification_service: EmployeeVerificationService | None = None
 
 
-def get_ragic_service() -> RagicService:
-    """Get singleton instance of RagicService."""
-    global _ragic_service
-    if _ragic_service is None:
-        _ragic_service = RagicService()
-    return _ragic_service
+def get_employee_verification_service() -> EmployeeVerificationService:
+    """Get singleton EmployeeVerificationService instance."""
+    global _verification_service
+    if _verification_service is None:
+        _verification_service = EmployeeVerificationService()
+    return _verification_service
