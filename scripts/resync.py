@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from sqlalchemy import select
 from core.database import get_standalone_session
 from modules.administrative.models import AdministrativeAccount
-from modules.administrative.services.ragic_sync import RagicSyncService
+from modules.administrative.services import get_account_sync_service
 
 
 async def main():
@@ -25,11 +25,11 @@ async def main():
     print("=" * 60)
     
     # Run sync
-    service = RagicSyncService()
+    service = get_account_sync_service()
     try:
         result = await service.sync_all_data()
-        print(f"✓ Synced: {result['accounts_synced']} accounts")
-        print(f"  Skipped: {result['accounts_skipped']}")
+        print(f"✓ Synced: {result.synced} accounts")
+        print(f"  Skipped: {result.skipped}")
     finally:
         await service.close()
     

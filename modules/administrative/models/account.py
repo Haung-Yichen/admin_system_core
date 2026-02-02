@@ -26,7 +26,7 @@ class AdministrativeAccount(Base, TimestampMixin):
     Account cache table synced from Ragic.
     
     This model stores a local copy of account data from the Ragic No-Code DB.
-    The sync is performed by RagicSyncService on application startup.
+    The sync is performed by AccountSyncService on application startup.
     
     Primary Key: ragic_id (Field 1005971 - 帳號系統編號)
     Unique: account_id (Field 1005972 - 帳號)

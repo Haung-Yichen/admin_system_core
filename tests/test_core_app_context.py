@@ -157,7 +157,7 @@ class TestAppContext:
         """Test line_client property lazily initializes."""
         from core.app_context import AppContext
         
-        with patch('services.line_client.LineClient') as MockLineClient:
+        with patch('core.line_client.LineClient') as MockLineClient:
             mock_instance = MagicMock()
             MockLineClient.return_value = mock_instance
             

@@ -32,7 +32,7 @@ class TestIAppModuleInterface:
         
         assert "get_module_name" in abstract_methods
         assert "on_entry" in abstract_methods
-        assert "handle_event" in abstract_methods
+        # handle_event is no longer abstract, has default implementation
     
     def test_get_menu_config_has_default(self):
         """Test get_menu_config() has default implementation."""

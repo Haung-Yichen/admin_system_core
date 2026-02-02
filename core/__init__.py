@@ -3,8 +3,7 @@ from core.app_context import AppContext, ConfigLoader, IModuleContext, get_app_c
 from core.interface import IAppModule, IConfigurable, ILoggable, ModuleContext
 from core.logging_config import setup_logging
 from core.registry import ModuleRegistry, ModuleLoader
-from core.router import EventRouter, WebhookDispatcher
-from core.server import create_base_app, set_registry, set_webhook_handler
+from core.server import create_base_app, set_registry
 from core import database
 
 # LINE Client
@@ -59,11 +58,10 @@ from core.line_auth import (
 )
 
 __all__ = [
-    # Legacy exports (backward compatibility)
+    # Core exports
     "AppContext", "ConfigLoader", "IAppModule",
     "ModuleRegistry", "ModuleLoader",
-    "EventRouter", "WebhookDispatcher",
-    "create_base_app", "set_registry", "set_webhook_handler",
+    "create_base_app", "set_registry",
     "setup_logging", "database",
     # LINE Client
     "LineClient",

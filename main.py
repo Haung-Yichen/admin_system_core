@@ -23,8 +23,7 @@ from core.app_context import AppContext
 from core.database import close_db_connections, init_database
 from core.logging_config import setup_logging
 from core.registry import ModuleLoader, ModuleRegistry
-from core.router import EventRouter, WebhookDispatcher
-from core.server import create_base_app, set_registry, set_webhook_handler
+from core.server import create_base_app, set_registry
 
 # Module directory path
 MODULES_DIR = "modules"
@@ -100,17 +99,7 @@ def create_fastapi_app(context: AppContext, registry: ModuleRegistry) -> FastAPI
     # Create base FastAPI app with webhook routes
     app = create_base_app(context, registry)
 
-    # Configure webhook handler for legacy endpoint
-    router = EventRouter(registry, context)
-    webhook_dispatcher = WebhookDispatcher(router, context)
-
-    def handle_webhook(payload: dict) -> dict:
-        """Handle incoming webhook events."""
-        if "events" in payload:  # LINE webhook
-            return webhook_dispatcher.dispatch_line_webhook(payload)
-        return router.route(payload)
-
-    set_webhook_handler(app, handle_webhook)
+    # Set registry for dynamic webhook routing
     set_registry(app, registry)
 
     # Set shared context and registry for system API

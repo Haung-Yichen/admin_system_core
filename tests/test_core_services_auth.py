@@ -97,27 +97,29 @@ class TestAuthService:
             )
 
             mock_send.assert_called_once()
-            assert "Verification email sent" in result
+            # Updated to use Chinese message from user enumeration protection
+            assert "如果此信箱已註冊為員工" in result or "註冊為員工" in result
 
     @pytest.mark.asyncio
     async def test_initiate_magic_link_email_not_found(self, auth_service, mock_ragic_service):
-        """Test initiate_magic_link() raises on non-existent email."""
-        from core.services.auth import EmailNotFoundError
-
+        """Test initiate_magic_link() does NOT raise for non-existent email (user enumeration protection)."""
         mock_ragic_service.verify_email_exists = AsyncMock(return_value=None)
 
-        with pytest.raises(EmailNotFoundError):
-            await auth_service.initiate_magic_link(
-                email="notfound@example.com",
-                line_sub="U1234567890"
-            )
+        # Should return success message without raising exception
+        result = await auth_service.initiate_magic_link(
+            email="notfound@example.com",
+            line_sub="U1234567890"
+        )
+        
+        assert "如果此信箱已註冊為員工" in result or "註冊為員工" in result
 
     def test_generate_magic_link(self, auth_service, mock_env_vars):
         """Test generate_magic_link() creates valid URL."""
         link = auth_service.generate_magic_link(
             "test@example.com", "U1234567890")
 
-        assert "https://test.example.com/api/auth/verify?token=" in link
+        # Updated path without /api/ prefix
+        assert "https://test.example.com/auth/verify?token=" in link
 
     def test_get_auth_service_singleton(self, mock_env_vars):
         """Test get_auth_service() returns singleton."""

@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from sqlalchemy import text
 from core.database import get_standalone_session, get_thread_local_engine
-from modules.administrative.services.ragic_sync import RagicSyncService
+from modules.administrative.services import AccountSyncService, get_account_sync_service
 
 
 async def drop_old_tables():
@@ -42,22 +42,24 @@ async def sync_accounts():
     print("Step 2: Syncing Account data from Ragic...")
     print("=" * 60)
     
-    service = RagicSyncService()
+    service = get_account_sync_service()
     
     try:
         result = await service.sync_all_data()
         
-        print(f"  ✓ Accounts synced: {result['accounts_synced']}")
-        print(f"  ✓ Accounts skipped: {result['accounts_skipped']}")
+        print(f"  ✓ Accounts synced: {result.synced}")
+        print(f"  ✓ Accounts skipped: {result.skipped}")
         
-        if result['schema_issues']:
-            print(f"  ⚠ Schema issues: {result['schema_issues']}")
+        if result.error_messages:
+            print(f"  ⚠ Schema issues: {result.error_messages}")
         
         return result
         
     except Exception as e:
         print(f"  ✗ Sync failed: {e}")
         raise
+    finally:
+        await service.close()
 
 
 async def verify_data():

@@ -1,24 +1,14 @@
 """
-Services module - DEPRECATED.
+Services module - Business service implementations.
 
-This module is deprecated. Use core module instead:
+Core services like LineClient have been moved to the core module:
 
     from core.line_client import LineClient
     from core.ragic import RagicService
-
-These shims are provided for backward compatibility only.
 """
-import warnings
 
-# Re-export from new locations for backward compatibility
-from core.line_client import LineClient
+# This module now contains only business-level services
+# LineClient is in core.line_client
+# RagicService is in core.ragic
 
-# Emit deprecation warning on import
-warnings.warn(
-    "The 'services' module is deprecated. "
-    "Use 'core.line_client.LineClient' instead.",
-    DeprecationWarning,
-    stacklevel=2
-)
-
-__all__ = ["LineClient"]
+__all__: list[str] = []

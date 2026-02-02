@@ -187,14 +187,17 @@ class IAppModule(ABC):
         """
         pass
 
-    @abstractmethod
     def handle_event(
         self,
         context: "AppContext",
         event: dict[str, Any],
     ) -> Optional[dict[str, Any]]:
         """
-        Handles incoming events routed to this module.
+        Handles incoming events routed to this module (OPTIONAL).
+        
+        This method is kept for backward compatibility with legacy modules.
+        New modules should implement handle_line_event() instead for LINE
+        webhook handling, or define custom API endpoints.
         
         Args:
             context: The application context (implements IModuleContext)
@@ -202,8 +205,12 @@ class IAppModule(ABC):
             
         Returns:
             Optional response dictionary
+            
+        Note:
+            Default implementation returns None. Override only if your
+            module needs custom internal event handling.
         """
-        pass
+        return None
 
     def get_menu_config(self) -> dict[str, Any]:
         """

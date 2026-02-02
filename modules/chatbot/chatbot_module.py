@@ -144,8 +144,8 @@ class ChatbotModule(IAppModule):
         """
         Handle events routed to this module.
 
-        This module primarily handles events via its API routers,
-        but can also process events from the EventRouter if needed.
+        This module primarily handles events via its API routers
+        and LINE webhook handlers.
         """
         event_type = event.get("type", "")
         content = event.get("content", "")

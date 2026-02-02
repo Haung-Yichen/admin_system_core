@@ -579,7 +579,7 @@ class TestLineClientIntegration:
 
     def test_line_client_supports_custom_credentials(self, mock_env_vars):
         """Test LineClient accepts custom credentials."""
-        from services.line_client import LineClient
+        from core.line_client import LineClient
         
         client = LineClient(
             channel_secret="custom-secret",
@@ -591,7 +591,7 @@ class TestLineClientIntegration:
 
     def test_line_client_is_configured(self, mock_env_vars):
         """Test is_configured returns correct status."""
-        from services.line_client import LineClient
+        from core.line_client import LineClient
         
         configured = LineClient(
             channel_secret="secret",
@@ -608,7 +608,7 @@ class TestLineClientIntegration:
     @pytest.mark.asyncio
     async def test_line_client_post_reply(self, mock_env_vars, mock_async_client):
         """Test LineClient reply functionality."""
-        from services.line_client import LineClient
+        from core.line_client import LineClient
         
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -630,7 +630,7 @@ class TestLineClientIntegration:
     @pytest.mark.asyncio
     async def test_line_client_post_push(self, mock_env_vars, mock_async_client):
         """Test LineClient push functionality."""
-        from services.line_client import LineClient
+        from core.line_client import LineClient
         
         mock_response = MagicMock()
         mock_response.status_code = 200

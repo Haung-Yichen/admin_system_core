@@ -47,7 +47,6 @@ def create_base_app(
     # Store references in app state for access in route handlers
     app.state.context = context
     app.state.registry = registry
-    app.state.webhook_handler: Callable[[dict[str, Any]], dict[str, Any]] | None = None
 
     # Add CORS middleware
     app.add_middleware(
@@ -175,46 +174,6 @@ def _register_line_webhook_routes(app: FastAPI) -> None:
 
         return {"processed": len(responses), "results": responses}
 
-    @app.post("/webhook/line")
-    async def line_webhook_legacy(request: Request) -> dict[str, Any]:
-        """LINE webhook endpoint (DEPRECATED - use /webhook/line/{module_name})."""
-        context: AppContext = request.app.state.context
-        webhook_handler = request.app.state.webhook_handler
-
-        try:
-            payload = await request.json()
-            context.log_event("Received LINE webhook (deprecated endpoint)", "WEBHOOK")
-
-            if webhook_handler:
-                return webhook_handler(payload)
-
-            return {"status": "received", "message": "No handler configured"}
-
-        except Exception as e:
-            _logger.error(f"Webhook error: {e}")
-            context.log_event(f"Webhook error: {e}", "ERROR")
-            raise HTTPException(status_code=500, detail=str(e))
-
-    @app.post("/webhook/generic")
-    async def generic_webhook(request: Request) -> dict[str, Any]:
-        """Generic webhook endpoint for other integrations."""
-        context: AppContext = request.app.state.context
-        webhook_handler = request.app.state.webhook_handler
-
-        try:
-            payload = await request.json()
-            context.log_event("Received generic webhook", "WEBHOOK")
-
-            if webhook_handler:
-                event = {"type": "generic_webhook", "payload": payload}
-                return webhook_handler(event)
-
-            return {"status": "received"}
-
-        except Exception as e:
-            _logger.error(f"Generic webhook error: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-
 
 def _verify_line_signature(body: bytes, signature: str, channel_secret: str) -> bool:
     """
@@ -244,20 +203,6 @@ def _verify_line_signature(body: bytes, signature: str, channel_secret: str) -> 
     except Exception as e:
         _logger.error(f"Signature verification error: {e}")
         return False
-
-
-def set_webhook_handler(
-    app: FastAPI,
-    handler: Callable[[dict[str, Any]], dict[str, Any]],
-) -> None:
-    """
-    Set the webhook event handler callback on the app.
-
-    Args:
-        app: FastAPI application instance.
-        handler: Callback function for handling webhook events.
-    """
-    app.state.webhook_handler = handler
 
 
 def set_registry(app: FastAPI, registry: "ModuleRegistry") -> None:

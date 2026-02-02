@@ -37,9 +37,10 @@ modules/administrative/
 │   └── liff.py                     # LIFF 頁面路由
 ├── services/
 │   ├── __init__.py                 # 匯出所有 services
+│   ├── account_sync.py             # AccountSyncService
+│   ├── leave_type_sync.py          # LeaveTypeSyncService
 │   ├── leave.py                    # LeaveService
 │   ├── liff.py                     # LiffService (LIFF App 管理)
-│   ├── ragic_sync.py               # RagicSyncService
 │   └── rich_menu.py                # RichMenuService
 ├── scripts/
 │   ├── __init__.py
@@ -159,24 +160,34 @@ class LeaveType(Base, TimestampMixin):
 
 ## Services
 
-### RagicSyncService
+### AccountSyncService
 
-同步 Ragic 資料到本地 PostgreSQL：
+同步員工帳號資料從 Ragic 到本地 PostgreSQL：
 
 ```python
-from modules.administrative.services import RagicSyncService
+from modules.administrative.services import get_account_sync_service
 
-sync_service = RagicSyncService()
+sync_service = get_account_sync_service()
 result = await sync_service.sync_all_data()
-print(f"Synced {result['accounts_synced']} accounts")
-print(f"Synced {result['leave_types_synced']} leave types")
+print(f"Synced {result.synced} accounts, skipped {result.skipped}")
+```
+
+### LeaveTypeSyncService
+
+同步假別主檔資料：
+
+```python
+from modules.administrative.services import get_leave_type_sync_service
+
+sync_service = get_leave_type_sync_service()
+result = await sync_service.sync_all_data()
+print(f"Synced {result.synced} leave types")
 ```
 
 **特性：**
-- **Unified Sync**: 同步 `AdministrativeAccount` (帳號/部門) 與 `LeaveType` (假別)。
+- **BaseRagicSyncService**: 繼承自 Core 的統一同步基類。
 - **Batch Processing**: 分批次處理避免資料庫參數限制。
-- **Auto-Schema**: 自動檢查表是否存在並建立。
-- **Direct Link**: 透過 URL 直接指定 Ragic 表單來源。
+- **RagicRegistry**: 透過中央 Registry 取得欄位 ID 映射。
 
 ### RichMenuService
 
@@ -313,7 +324,7 @@ python -m modules.administrative.scripts.setup_line
 
 ### 運作流程
 
-1. **同步啟動**：`RagicSyncService` 開始從 Ragic 抓取員工資料。
+1. **同步啟動**：`AccountSyncService` 開始從 Ragic 抓取員工資料。
 2. **建立對照表**：同時從 `core.models.User` 表讀取所有已驗證用戶，建立 `display_name -> email` 的對照表 (`_build_name_to_email_map`)。
 3. **逐筆處理**：
    - 讀取 Ragic 記錄。

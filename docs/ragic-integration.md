@@ -136,16 +136,18 @@ class OvertimeSchema(BaseModel):
 ```
 
 #### 3. 實作同步邏輯 (Implement Sync Logic)
-擴充 `RagicSyncService`，實作 Fetch -> Validate -> Upsert 流程。
+繼承 `BaseRagicSyncService`，實作 Fetch -> Validate -> Upsert 流程。
 使用 `INSERT ... ON CONFLICT DO UPDATE` 語法確保 **Idempotency (冪等性)**。
 
 ```python
-async def sync_overtime(self):
-    # 1. Fetch raw data from Ragic
-    raw_data = await self._fetch_form_data(self._settings.ragic_url_overtime)
-    
-    # 2. Upsert to DB
-    async with get_thread_local_session() as session:
+from core.ragic.sync_base import BaseRagicSyncService
+
+class OvertimeSyncService(BaseRagicSyncService[OvertimeRecord]):
+    async def sync_all_data(self) -> SyncResult:
+        # 1. Fetch raw data from Ragic
+        raw_data = await self._fetch_form_data()
+        
+        # 2. Transform and upsert to DB
         # Implementation details...
         pass
 ```

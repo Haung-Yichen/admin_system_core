@@ -12,7 +12,7 @@ This file is kept for backward compatibility with existing code that imports:
 IMPORTANT: Employee lookup methods (verify_email_exists, get_employee_by_id)
 now use the local database cache (administrative_accounts table) instead of
 hitting the Ragic API directly. This improves performance and consistency.
-The cache is synced from Ragic on application startup by RagicSyncService.
+The cache is synced from Ragic on application startup by AccountSyncService.
 """
 
 import logging
