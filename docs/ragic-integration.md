@@ -14,8 +14,8 @@ Admin System Core 支援兩種與 Ragic 互動的模式，請依據業務場景�
 | **適用情境** | 寫入資料、即時性要求高、單筆查詢 | 讀取頻率高、需要關聯查詢 (Join)、報表統計 |
 | **資料來源** | 直接呼叫 Ragic API | 本地 PostgreSQL 資料庫 |
 | **延遲** | 較高 (HTTP RTT) | 極低 (Local DB Query) |
-| **實作位置** | Core Framework (`core/ragic`) | Module (`modules/administrative/services/ragic_sync.py`) |
-| **範例** | 提交請假單、寫入打卡紀錄 | 員工名單查詢、部門組織樹、假別清單 |
+| **實作位置** | Core Framework (`core/ragic`) | Core (`core/services/user_sync.py`) 或 Module (`modules/...`) |
+| **範例** | 提交請假單、寫入打卡紀錄 | 員工名單 (Core 管理)、部門組織樹、假別清單 (Module 管理) |
 
 ---
 

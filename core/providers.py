@@ -21,7 +21,7 @@ import os
 from dotenv import load_dotenv
 
 if TYPE_CHECKING:
-    from services.line_client import LineClient
+    from core.line_client import LineClient
     from core.ragic import RagicService
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -338,7 +338,7 @@ def get_line_client_provider() -> ServiceProvider:
     global _line_client_provider
     if _line_client_provider is None:
         def create_line_client():
-            from services.line_client import LineClient
+            from core.line_client import LineClient
             return LineClient(get_configuration_provider())
         _line_client_provider = ServiceProvider(create_line_client)
     return _line_client_provider

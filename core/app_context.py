@@ -39,7 +39,7 @@ from core.providers import (
 )
 
 if TYPE_CHECKING:
-    from services.line_client import LineClient
+    from core.line_client import LineClient
     from core.ragic import RagicService
 
 

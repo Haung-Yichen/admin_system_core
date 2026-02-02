@@ -41,7 +41,7 @@ from core.security.webhook import (
 )
 
 if TYPE_CHECKING:
-    from services.line_client import LineClient
+    from core.line_client import LineClient
     from core.ragic import RagicService
     from sqlalchemy.ext.asyncio import AsyncSession
 

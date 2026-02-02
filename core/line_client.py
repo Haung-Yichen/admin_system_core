@@ -1,0 +1,260 @@
+"""
+LINE Client - Pure HTTP communication with LINE API.
+Only responsible for sending/receiving data, no message formatting.
+"""
+from typing import Any, Dict, List, Optional
+import logging
+import hmac
+import hashlib
+import base64
+
+import httpx
+
+from core.app_context import ConfigLoader
+
+
+class LineClient:
+    """
+    Low-level LINE API client.
+    Only handles HTTP communication and signature verification.
+    
+    Supports multi-account usage by allowing credentials to be passed
+    directly on initialization (for module-specific bots) or loaded
+    from ConfigLoader (for backward compatibility).
+    """
+    
+    API_BASE = "https://api.line.me/v2/bot"
+    
+    def __init__(
+        self, 
+        config: ConfigLoader | None = None,
+        *,
+        channel_secret: str | None = None,
+        access_token: str | None = None,
+    ) -> None:
+        """
+        Initialize LINE client.
+        
+        Args:
+            config: Optional ConfigLoader for loading credentials from global config.
+            channel_secret: Direct channel secret (takes precedence over config).
+            access_token: Direct access token (takes precedence over config).
+        """
+        self._logger = logging.getLogger(__name__)
+        
+        # Priority: direct params > config > empty
+        if channel_secret is not None:
+            self._channel_secret = channel_secret
+        elif config is not None:
+            self._channel_secret = config.get("line.channel_secret", "")
+        else:
+            self._channel_secret = ""
+        
+        if access_token is not None:
+            self._access_token = access_token
+        elif config is not None:
+            self._access_token = config.get("line.channel_access_token", "")
+        else:
+            self._access_token = ""
+        
+        self._client = httpx.AsyncClient(timeout=30.0)
+    
+    def _headers(self) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._access_token}",
+            "Content-Type": "application/json"
+        }
+    
+    def is_configured(self) -> bool:
+        """Check if credentials are set."""
+        return bool(self._channel_secret and self._access_token)
+    
+    async def check_connection(self) -> dict:
+        """
+        Check LINE Bot API connectivity for dashboard health monitoring.
+        
+        Performs a GET request to /v2/bot/info to verify:
+        1. Network connectivity to LINE servers
+        2. Access token validity
+        3. Bot profile information
+        
+        Returns:
+            dict: Health check result with structure:
+                {
+                    "status": "healthy" | "warning" | "error",
+                    "message": "Description of the status",
+                    "details": {
+                        "Bot Name": "My Bot",
+                        "Bot ID": "Uxxxxxxxxx",
+                        "Latency": "123ms",
+                    }
+                }
+        """
+        import time
+        
+        if not self.is_configured():
+            return {
+                "status": "error",
+                "message": "Not configured",
+                "details": {
+                    "Channel Secret": "Not set" if not self._channel_secret else "Set",
+                    "Access Token": "Not set" if not self._access_token else "Set",
+                }
+            }
+        
+        try:
+            start_time = time.time()
+            
+            resp = await self._client.get(
+                f"{self.API_BASE}/info",
+                headers=self._headers(),
+                timeout=10.0
+            )
+            
+            latency_ms = int((time.time() - start_time) * 1000)
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                return {
+                    "status": "healthy",
+                    "message": "Connected",
+                    "details": {
+                        "Bot Name": data.get("displayName", "Unknown"),
+                        "Bot ID": data.get("userId", "Unknown")[:12] + "...",
+                        "Latency": f"{latency_ms}ms",
+                    }
+                }
+            elif resp.status_code == 401:
+                return {
+                    "status": "error",
+                    "message": "Invalid token",
+                    "details": {
+                        "Latency": f"{latency_ms}ms",
+                        "Error": "Access token invalid or expired",
+                    }
+                }
+            else:
+                return {
+                    "status": "warning",
+                    "message": f"HTTP {resp.status_code}",
+                    "details": {
+                        "Latency": f"{latency_ms}ms",
+                    }
+                }
+                
+        except Exception as e:
+            self._logger.error(f"LINE health check failed: {e}")
+            return {
+                "status": "error",
+                "message": "Connection failed",
+                "details": {
+                    "Error": str(e)[:50],
+                }
+            }
+    
+    def verify_signature(self, body: bytes, signature: str) -> bool:
+        """Verify LINE webhook signature."""
+        if not self._channel_secret:
+            return False
+        
+        expected = base64.b64encode(
+            hmac.new(
+                self._channel_secret.encode(),
+                body,
+                hashlib.sha256
+            ).digest()
+        ).decode()
+        
+        return hmac.compare_digest(signature, expected)
+    
+    async def post_reply(
+        self, 
+        reply_token: str, 
+        messages: List[Dict[str, Any]]
+    ) -> bool:
+        """
+        POST to /message/reply endpoint.
+        
+        Args:
+            reply_token: Token from webhook event
+            messages: Pre-formatted message objects
+        """
+        if not self.is_configured():
+            self._logger.warning("LINE client not configured")
+            return False
+        
+        try:
+            resp = await self._client.post(
+                f"{self.API_BASE}/message/reply",
+                headers=self._headers(),
+                json={"replyToken": reply_token, "messages": messages[:5]}
+            )
+            return resp.status_code == 200
+        except Exception as e:
+            self._logger.error(f"Reply failed: {e}")
+            return False
+    
+    async def post_push(
+        self, 
+        to: str, 
+        messages: List[Dict[str, Any]]
+    ) -> bool:
+        """
+        POST to /message/push endpoint.
+        
+        Args:
+            to: User/Group/Room ID
+            messages: Pre-formatted message objects
+        """
+        if not self.is_configured():
+            return False
+        
+        try:
+            resp = await self._client.post(
+                f"{self.API_BASE}/message/push",
+                headers=self._headers(),
+                json={"to": to, "messages": messages[:5]}
+            )
+            return resp.status_code == 200
+        except Exception as e:
+            self._logger.error(f"Push failed: {e}")
+            return False
+    
+    async def post_multicast(
+        self, 
+        to: List[str], 
+        messages: List[Dict[str, Any]]
+    ) -> bool:
+        """POST to /message/multicast endpoint."""
+        if not self.is_configured():
+            return False
+        
+        try:
+            resp = await self._client.post(
+                f"{self.API_BASE}/message/multicast",
+                headers=self._headers(),
+                json={"to": to[:500], "messages": messages[:5]}
+            )
+            return resp.status_code == 200
+        except Exception as e:
+            self._logger.error(f"Multicast failed: {e}")
+            return False
+    
+    async def get_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """GET user profile from /profile/{userId}."""
+        if not self.is_configured():
+            return None
+        
+        try:
+            resp = await self._client.get(
+                f"{self.API_BASE}/profile/{user_id}",
+                headers=self._headers()
+            )
+            return resp.json() if resp.status_code == 200 else None
+        except Exception as e:
+            self._logger.error(f"Get profile failed: {e}")
+            return None
+    
+    async def close(self) -> None:
+        """Close HTTP client."""
+        await self._client.aclose()

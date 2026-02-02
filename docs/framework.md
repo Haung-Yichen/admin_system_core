@@ -77,8 +77,19 @@ Admin System Core 採用 **Modular Monolith (模組化單體)** 架構。
 負責 LINE ID Token 驗證與 Magic Link 帳號綁定。
 *   `get_auth_service()`: 取得 singleton 實例
 *   `verify_line_id_token(id_token)`: 驗證 LINE ID Token
-*   `check_binding_status`: 檢查帳號綁定狀態
+*   `check_binding_status`: 檢查帳號綁定狀態（查詢本地加密 `users` 表）
 *   `initiate_magic_link`: 發送登入驗證信
+
+### AuthTokenService (`core/services/auth_token.py`)
+負責 Magic Link JWT Token 的生成與驗證。
+*   `create_magic_link_token`: 產生包含 email, line_sub 的短期 Token
+*   `verify_magic_link_token`: 驗證 Token 合法性與過期時間
+
+### UserSyncService (`core/services/user_sync.py`)
+負責將 Ragic 的使用者資料（Email, Line ID, 姓名, 部門）同步至本地 PostgreSQL `users` 表。
+*   **同步策略**: Write-Through (Ragic 為主，Webhook 更新本地)
+*   **欄位映射**: Ragic 明文欄位 -> 本地加密欄位 (`core.models.User`)
+*   **功能**: 確保本地認證與查詢的效能與資料一致性。
 
 ### EmailService (`core/services/email.py`)
 統一的郵件發送服務，支援 SMTP 與非同步發送。
@@ -87,7 +98,7 @@ Admin System Core 採用 **Modular Monolith (模組化單體)** 架構。
 
 ### RagicService (Compatibility Layer) (`core/services/ragic.py`)
 舊版服務介面，現已重構為封裝 `core/ragic` 的功能。
-*   **重要變更**: `verify_email_exists` 與員工查詢功能現已改為**查詢本地資料庫快取** (`administrative_accounts` 表)，而非直接呼叫 Ragic API，以提升效能與穩定性。
+*   **重要變更**: 員工查詢功能已改為**查詢本地資料庫** (`administrative_accounts` 表)，而非直接呼叫 Ragic API，以提升效能與穩定性。
 
 ---
 
@@ -95,8 +106,19 @@ Admin System Core 採用 **Modular Monolith (模組化單體)** 架構。
 
 框架自動掛載以下端點，模組**不需**自行實作：
 
-### 認證與授權 (Auth)
+### 1. 認證與授權 (Unified Auth)
 Prefix: `/auth`
+*   主要處理使用者 Magic Link 登入流程。
+*   由 `core.api.auth` 提供。
+
+### 2. 管理員認證 (Admin Auth)
+Prefix: `/api/admin/auth`
+*   提供 Dashboard 使用的 JWT 登入。
+*   由 `api.admin_auth` 提供。
+
+### 3. Webhook 接收
+*   `/webhook/line/{module_name}`: LINE Bot Webhook (由 `core/server.py` 處理)
+*   `/api/webhooks/ragic`: Ragic 資料變更 Webhook (由 `api/webhooks.py` 處理)
 
 | 路徑                   | 方法 | 說明                            |
 | ---------------------- | ---- | ------------------------------- |

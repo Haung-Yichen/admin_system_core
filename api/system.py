@@ -321,7 +321,7 @@ async def get_dashboard_data(
     
     # Check LINE
     try:
-        from services.line_client import LineClient
+        from core.line_client import LineClient
         line_client = LineClient(config=context.config)
         line_health = await line_client.check_connection()
         services.append(ServiceHealth(

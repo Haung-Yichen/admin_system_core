@@ -8,7 +8,7 @@ This wraps the core LineClient with chatbot-specific credentials.
 import logging
 from typing import Any, Dict, List
 
-from services.line_client import LineClient
+from core.line_client import LineClient
 from modules.chatbot.core.config import get_chatbot_settings
 
 

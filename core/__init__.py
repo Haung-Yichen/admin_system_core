@@ -7,6 +7,9 @@ from core.router import EventRouter, WebhookDispatcher
 from core.server import create_base_app, set_registry, set_webhook_handler
 from core import database
 
+# LINE Client
+from core.line_client import LineClient
+
 # Dependency Injection Providers
 from core.providers import (
     ConfigurationProvider,
@@ -62,6 +65,8 @@ __all__ = [
     "EventRouter", "WebhookDispatcher",
     "create_base_app", "set_registry", "set_webhook_handler",
     "setup_logging", "database",
+    # LINE Client
+    "LineClient",
     # New DI exports
     "IModuleContext", "get_app_context", "IConfigurable", "ILoggable", "ModuleContext",
     "ConfigurationProvider", "LogService", "ServerState", "ServiceProvider", "ProviderRegistry",
