@@ -37,9 +37,12 @@ from modules.administrative.services.email_notification import get_email_notific
 
 logger = logging.getLogger(__name__)
 
-# Environment flag to skip authentication for development/testing
-DEBUG_SKIP_AUTH = os.environ.get(
-    "DEBUG_SKIP_AUTH", "").lower() in ("true", "1", "yes")
+# Environment flag to skip authentication for LOCAL development only
+# SECURITY: This should NEVER be enabled in production (Cloudflare/public network)
+_debug_skip_raw = os.environ.get("DEBUG_SKIP_AUTH", "").lower() in ("true", "1", "yes")
+_server_host = os.environ.get("SERVER_HOST", "127.0.0.1")
+_is_local = _server_host in ("127.0.0.1", "localhost")
+DEBUG_SKIP_AUTH = _debug_skip_raw and _is_local  # Only works on localhost
 
 class LeaveError(Exception):
     """Base exception for leave-related errors."""

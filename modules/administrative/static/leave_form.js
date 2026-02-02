@@ -298,10 +298,137 @@
         }
     }
 
+    // Load leave types from backend
+    async function loadLeaveTypes() {
+        try {
+            debugLog('Loading leave types...');
+            const response = await fetchWithTimeout(`${API_BASE_URL}/api/administrative/leave/types`);
+            
+            if (!response.ok) {
+                debugLog('Failed to load leave types: ' + response.status, true);
+                return;
+            }
+            
+            const data = await response.json();
+            debugLog('Leave types loaded: ' + data.leave_types.length);
+            
+            const select = document.getElementById('leave-type');
+            select.innerHTML = '<option value="">請選擇假別</option>';
+            
+            data.leave_types.forEach(type => {
+                const option = document.createElement('option');
+                option.value = type.code;
+                option.textContent = type.name;
+                select.appendChild(option);
+            });
+            
+        } catch (error) {
+            debugLog('Load leave types error: ' + error.message, true);
+            const select = document.getElementById('leave-type');
+            select.innerHTML = '<option value="">載入失敗，請重試</option>';
+        }
+    }
+
+    // Load workdays based on date range
+    async function loadWorkdays() {
+        const startDate = document.getElementById('start-date').value;
+        const endDate = document.getElementById('end-date').value;
+        const container = document.getElementById('workdays-container');
+        const list = document.getElementById('workdays-list');
+        
+        if (!startDate || !endDate) {
+            container.style.display = 'none';
+            return;
+        }
+        
+        // Validate date range
+        if (new Date(startDate) > new Date(endDate)) {
+            container.style.display = 'none';
+            return;
+        }
+        
+        try {
+            debugLog(`Loading workdays from ${startDate} to ${endDate}...`);
+            list.innerHTML = '<div class="workdays-loading">載入中...</div>';
+            container.style.display = 'block';
+            
+            // Use POST to avoid LINE Browser URL validation issues
+            const response = await fetchWithTimeout(
+                `${API_BASE_URL}/api/administrative/leave/workdays`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        start_date: startDate,
+                        end_date: endDate
+                    })
+                }
+            );
+            
+            if (!response.ok) {
+                throw new Error('Failed to load workdays');
+            }
+            
+            const data = await response.json();
+            debugLog('Workdays loaded: ' + data.total_days);
+            
+            if (data.workdays.length === 0) {
+                list.innerHTML = '<div class="workdays-loading">所選日期範圍內無工作日</div>';
+                return;
+            }
+            
+            const weekdayNames = ['一', '二', '三', '四', '五', '六', '日'];
+            
+            list.innerHTML = data.workdays.map(day => {
+                const weekdayName = weekdayNames[day.weekday];
+                return `
+                    <label class="workday-item" data-date="${day.date}">
+                        <input type="checkbox" class="workday-checkbox" value="${day.date}">
+                        <span class="workday-label">${day.date}</span>
+                        <span class="workday-weekday">週${weekdayName}</span>
+                    </label>
+                `;
+            }).join('');
+            
+            // Add click handlers for visual feedback
+            list.querySelectorAll('.workday-item').forEach(item => {
+                item.addEventListener('click', function(e) {
+                    if (e.target.type !== 'checkbox') {
+                        const checkbox = this.querySelector('.workday-checkbox');
+                        checkbox.checked = !checkbox.checked;
+                    }
+                    this.classList.toggle('selected', this.querySelector('.workday-checkbox').checked);
+                });
+            });
+            
+        } catch (error) {
+            debugLog('Load workdays error: ' + error.message, true);
+            list.innerHTML = '<div class="workdays-loading">載入失敗，請重試</div>';
+        }
+    }
+
+    // Select/deselect all workdays helpers
+    window.selectAllDays = function() {
+        document.querySelectorAll('.workday-checkbox').forEach(cb => {
+            cb.checked = true;
+            cb.closest('.workday-item').classList.add('selected');
+        });
+    };
+
+    window.deselectAllDays = function() {
+        document.querySelectorAll('.workday-checkbox').forEach(cb => {
+            cb.checked = false;
+            cb.closest('.workday-item').classList.remove('selected');
+        });
+    };
+
     // Load user data from backend
     async function loadUserData() {
         try {
             debugLog('Loading user data...');
+
+            // Load leave types in parallel
+            loadLeaveTypes();
 
             // Use POST method with ID Token in body (to match backend endpoint)
             const targetUrl = `${API_BASE_URL}/api/administrative/leave/init`;
@@ -423,11 +550,42 @@
         submitBtn.innerHTML = '<span class="spinner" style="width:20px;height:20px;border-width:2px;"></span><span>處理中...</span>';
 
         try {
+            // Validate leave type
+            const leaveType = document.getElementById('leave-type').value;
+            if (!leaveType) {
+                alert('請選擇請假類別');
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<span>📤</span><span>送出申請</span>';
+                return;
+            }
+
+            // Validate reason
+            const reason = document.getElementById('reason').value.trim();
+            if (!reason) {
+                alert('請填寫請假事由');
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<span>📤</span><span>送出申請</span>';
+                return;
+            }
+
+            // Get selected workdays
+            const selectedDays = [];
+            document.querySelectorAll('.workday-checkbox:checked').forEach(cb => {
+                selectedDays.push(cb.value);
+            });
+            
+            // Validate that at least one day is selected
+            if (selectedDays.length === 0) {
+                alert('請至少選擇一個請假日期');
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<span>📤</span><span>送出申請</span>';
+                return;
+            }
+
             const formData = {
-                start_date: document.getElementById('start-date').value,
-                end_date: document.getElementById('end-date').value,
-                leave_type: document.getElementById('leave-type').value,
-                reason: document.getElementById('reason').value,
+                leave_dates: selectedDays,
+                leave_type: leaveType,
+                reason: reason,
             };
 
             // Simplified: Use query parameters for auth to avoid header complexity/errors
@@ -437,6 +595,7 @@
 
             const targetUrl = `${API_BASE_URL}/api/administrative/leave/submit?${params.toString()}`;
             debugLog('Submitting to /api/administrative/leave/submit with query params');
+            debugLog('Form data: ' + JSON.stringify(formData));
 
             const response = await fetch(
                 targetUrl,
@@ -595,6 +754,18 @@
         document.getElementById('success-container').style.display = 'none';
         document.getElementById('form-container').classList.add('active');
         document.getElementById('submit-section').classList.remove('hidden');
+        
+        // Setup date change listeners for workdays calculation
+        const startDateInput = document.getElementById('start-date');
+        const endDateInput = document.getElementById('end-date');
+        
+        startDateInput.addEventListener('change', loadWorkdays);
+        endDateInput.addEventListener('change', loadWorkdays);
+        
+        // Initial load of workdays if dates are already set
+        if (startDateInput.value && endDateInput.value) {
+            loadWorkdays();
+        }
     }
 
     function showSuccess() {

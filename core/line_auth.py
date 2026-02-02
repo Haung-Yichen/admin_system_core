@@ -115,13 +115,12 @@ class LineAuthMessages:
         return {
             "type": "bubble",
             "hero": {
-                "type": "box",
-                "layout": "vertical",
-                "contents": [
-                    {"type": "text", "text": "🔐", "size": "4xl", "align": "center"}
-                ],
-                "backgroundColor": "#00B900",
-                "paddingAll": "20px",
+                "type": "image",
+                "url": f"{base_url}/static/crown.png",
+                "size": "full",
+                "aspectRatio": "20:13",
+                "aspectMode": "fit",
+                "backgroundColor": "#FFFFFF",
             },
             "body": {
                 "type": "box",

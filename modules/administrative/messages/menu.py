@@ -289,19 +289,13 @@ def create_auth_required_flex(line_user_id: str) -> dict[str, Any]:
 
     return {
         "type": "bubble",
-        "header": {
-            "type": "box",
-            "layout": "vertical",
-            "contents": [
-                {
-                    "type": "text",
-                    "text": "🔐",
-                    "size": "4xl",
-                    "align": "center",
-                },
-            ],
-            "backgroundColor": "#1A1A2E",
-            "paddingAll": "25px",
+        "hero": {
+            "type": "image",
+            "url": f"{base_url}/static/crown.png",
+            "size": "full",
+            "aspectRatio": "20:13",
+            "aspectMode": "fit",
+            "backgroundColor": "#FFFFFF",
         },
         "body": {
             "type": "box",

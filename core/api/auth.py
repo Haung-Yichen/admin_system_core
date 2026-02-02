@@ -84,7 +84,7 @@ def get_login_html(line_sub: str, error: str | None = None, success: str | None 
 </head>
 <body>
     <div class="container">
-        <div class="header"><div class="icon">🔐</div><h1>身份驗證</h1><p>Identity Verification</p></div>
+        <div class="header"><div class="icon"><img src="/static/crown.png" alt="Crown" style="width: 80px; height: auto;"></div><h1>身份驗證</h1><p>Identity Verification</p></div>
         <div class="content">
             {error_html}{success_html}
             <form method="POST" action="/auth/request-magic-link">
@@ -108,7 +108,7 @@ def get_verification_result_html(success: bool, message: str) -> str:
     app_name = config["app_name"]
     liff_id = config["liff_id"]
     
-    icon = "✅" if success else "❌"
+    icon = '<img src="/static/crown.png" alt="Crown" style="width: 100px; height: auto;">' if success else "❌"
     title = "驗證成功！" if success else "驗證失敗"
     bg = "#00B900" if success else "#DC2626"
     

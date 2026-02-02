@@ -209,7 +209,11 @@ class VectorService:
         category: str | None,
         similarity_threshold: float,
     ) -> list[tuple[SOPDocument, float]]:
-        embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+        # Validate embedding values are numeric (security: prevent injection)
+        if not all(isinstance(x, (int, float)) for x in query_embedding):
+            raise ValueError("Invalid embedding values")
+        
+        embedding_str = "[" + ",".join(str(float(x)) for x in query_embedding) + "]"
 
         query_parts = [
             f"SELECT *, (1 - (embedding <=> '{embedding_str}'::vector)) as similarity",

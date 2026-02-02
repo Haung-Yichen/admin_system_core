@@ -15,6 +15,7 @@ from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.app_context import AppContext
+from core.middleware import RateLimitMiddleware, RateLimitConfig
 
 if TYPE_CHECKING:
     from core.registry import ModuleRegistry
@@ -49,13 +50,51 @@ def create_base_app(
     app.state.registry = registry
 
     # Add CORS middleware
+    # Get allowed origins from configuration (defaults to BASE_URL only)
+    config = context.config
+    base_url = config.get("server.base_url", "")
+    allowed_origins = [base_url] if base_url else []
+    
+    # In debug mode, also allow localhost for development
+    if config.get("app.debug", False):
+        allowed_origins.extend([
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+            "https://localhost:8000",
+        ])
+    
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=allowed_origins if allowed_origins else ["*"],
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Line-ID-Token", "X-Hub-Signature-256"],
     )
+
+    # Add security headers middleware
+    @app.middleware("http")
+    async def add_security_headers(request: Request, call_next):
+        response = await call_next(request)
+        # Prevent clickjacking
+        response.headers["X-Frame-Options"] = "DENY"
+        # Prevent MIME type sniffing
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        # Enable XSS filter (legacy browsers)
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        # Referrer policy
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # Permissions policy (disable unnecessary features)
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        # HSTS (via Cloudflare, but add as backup)
+        if request.url.scheme == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
+    # Add rate limiting middleware (before other middleware)
+    # Note: In production with Cloudflare, you may also configure rate limiting at Cloudflare level
+    if not config.get("app.debug", False):
+        app.add_middleware(RateLimitMiddleware, config=RateLimitConfig())
+        _logger.info("Rate limiting middleware enabled")
 
     # Register core routes
     _register_core_routes(app)

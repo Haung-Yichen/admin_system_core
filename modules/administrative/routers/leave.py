@@ -14,8 +14,10 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+import httpx
 
 from core.database import get_db_session
+from core.dependencies import HttpClientDep
 from core.line_auth import (
     get_verified_user,
     VerifiedUser,
@@ -69,9 +71,12 @@ ALLOWED_WORKDAYS = [0, 2, 4]  # 0=Monday, 2=Wednesday, 4=Friday
 # Dependencies
 # =============================================================================
 
-# Environment flag to skip authentication for development/testing
-DEBUG_SKIP_AUTH = os.environ.get(
-    "DEBUG_SKIP_AUTH", "").lower() in ("true", "1", "yes")
+# Environment flag to skip authentication for LOCAL development only
+# SECURITY: This should NEVER be enabled in production (Cloudflare/public network)
+_debug_skip_raw = os.environ.get("DEBUG_SKIP_AUTH", "").lower() in ("true", "1", "yes")
+_server_host = os.environ.get("SERVER_HOST", "127.0.0.1")
+_is_local = _server_host in ("127.0.0.1", "localhost")
+DEBUG_SKIP_AUTH = _debug_skip_raw and _is_local  # Only works on localhost
 
 
 async def get_current_user_email(
@@ -455,6 +460,7 @@ async def submit_leave_request(
     email: Annotated[str, Depends(get_current_user_email)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
     leave_service: Annotated[LeaveService, Depends(get_leave_service)],
+    http_client: HttpClientDep,
 ) -> LeaveSubmitResponse:
     """
     Submit a leave request.
@@ -477,6 +483,7 @@ async def submit_leave_request(
     
     try:
         result = await leave_service.submit_leave_request(
+            http_client=http_client,
             email=email,
             leave_dates=request.leave_dates,
             reason=request.reason,
