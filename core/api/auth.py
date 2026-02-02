@@ -6,6 +6,7 @@ Handles Magic Link authentication flow.
 """
 
 import logging
+import os
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -44,6 +45,7 @@ def _get_app_config() -> dict:
     return {
         "app_name": loader.get("server.app_name", "Admin System"),
         "magic_link_expire_minutes": loader.get("security.magic_link_expire_minutes", 15),
+        "liff_id": os.getenv("ADMIN_LINE_LIFF_ID_VERIFY", ""),
     }
 
 
@@ -104,9 +106,39 @@ def get_login_html(line_sub: str, error: str | None = None, success: str | None 
 def get_verification_result_html(success: bool, message: str) -> str:
     config = _get_app_config()
     app_name = config["app_name"]
+    liff_id = config["liff_id"]
+    
     icon = "✅" if success else "❌"
     title = "驗證成功！" if success else "驗證失敗"
     bg = "#00B900" if success else "#DC2626"
+    
+    # LIFF Close Button Logic
+    close_script = f"""
+    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {{
+            const liffId = "{liff_id}";
+            if (liffId) {{
+                liff.init({{ liffId: liffId }}).then(() => {{
+                    console.log("LIFF initialized");
+                    // Auto-close if successful? Maybe wait for user action.
+                }}).catch(err => {{
+                    console.error("LIFF init failed", err);
+                }});
+            }}
+        }});
+        
+        function closeWindow() {{
+            if (typeof liff !== 'undefined' && liff.isInClient()) {{
+                liff.closeWindow();
+            }} else {{
+                window.close();
+                // If window.close() fails (browsers block it), show message
+                document.getElementById("close-msg").style.display = "block";
+            }}
+        }}
+    </script>
+    """
 
     return f"""
 <!DOCTYPE html>
@@ -120,15 +152,38 @@ def get_verification_result_html(success: bool, message: str) -> str:
         .container {{ background: white; border-radius: 16px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); max-width: 420px; width: 100%; text-align: center; padding: 50px 30px; }}
         .icon {{ font-size: 72px; margin-bottom: 20px; }}
         h1 {{ font-size: 28px; color: #1F2937; margin-bottom: 8px; }}
-        .description {{ color: #374151; line-height: 1.6; margin-bottom: 10px; }}
+        .description {{ color: #374151; line-height: 1.6; margin-bottom: 20px; font-size: 18px; }}
+        .btn {{
+            display: inline-block;
+            background-color: #06C755;
+            color: white;
+            padding: 12px 30px;
+            border-radius: 30px;
+            text-decoration: none;
+            font-weight: bold;
+            margin-top: 20px;
+            cursor: pointer;
+            border: none;
+            font-size: 16px;
+        }}
+        .btn:hover {{ background-color: #05B34C; }}
+        .btn-secondary {{ background-color: #6B7280; }}
+        .btn-secondary:hover {{ background-color: #4B5563; }}
     </style>
+    {close_script}
 </head>
 <body>
     <div class="container">
         <div class="icon">{icon}</div>
         <h1>{title}</h1>
         <p class="description">{message}</p>
-        <p style="color: #9CA3AF; font-size: 12px; margin-top: 30px;">您可以關閉此頁面 / You can close this page</p>
+        
+        <button onclick="closeWindow()" class="btn">關閉視窗</button>
+        
+        <p id="close-msg" style="display:none; color: #DC2626; font-size: 12px; margin-top: 10px;">
+            瀏覽器阻止了自動關閉，請手動關閉此分頁。
+        </p>
+        <p style="color: #9CA3AF; font-size: 12px; margin-top: 30px;">{app_name}</p>
     </div>
 </body>
 </html>
@@ -170,10 +225,17 @@ async def request_magic_link(
 
 @router.get("/verify", response_class=HTMLResponse)
 async def verify_magic_link(
-    token: Annotated[str, Query(description="Magic link token")],
-    db: Annotated[AsyncSession, Depends(get_db_session)],
-    auth_service: Annotated[AuthService, Depends(get_auth_service)],
+    token: Annotated[str | None, Query(description="Magic link token")] = None,
+    db: Annotated[AsyncSession, Depends(get_db_session)] = None,
+    auth_service: Annotated[AuthService, Depends(get_auth_service)] = None,
 ) -> HTMLResponse:
+    if not token:
+        # Handle missing token (e.g. if LIFF doesn't pass query params correctly)
+        return HTMLResponse(
+            content=get_verification_result_html(False, "無效的連結：缺少驗證代碼。請確認您的 LINE 設定。"),
+            status_code=400
+        )
+
     try:
         await auth_service.verify_magic_token(token, db)
         return HTMLResponse(content=get_verification_result_html(True, "您的 LINE 帳號已成功綁定！"))

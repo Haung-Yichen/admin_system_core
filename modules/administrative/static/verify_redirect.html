@@ -190,7 +190,7 @@
          */
 
         // Configuration
-        const API_BASE_URL = '/api/auth/verify';
+        const API_BASE_URL = '/auth/api/verify';
         const CLOSE_DELAY_MS = 2000;
 
         // DOM Elements
@@ -253,11 +253,13 @@
          * @returns {Promise<{success: boolean, message?: string, error?: string}>}
          */
         async function verifyToken(token) {
-            const response = await fetch(`${API_BASE_URL}?token=${encodeURIComponent(token)}`, {
-                method: 'GET',
+            const response = await fetch(API_BASE_URL, {
+                method: 'POST',
                 headers: {
+                    'Content-Type': 'application/json',
                     'Accept': 'application/json',
                 },
+                body: JSON.stringify({ token: token })
             });
 
             const data = await response.json();
@@ -290,7 +292,12 @@
          */
         async function main() {
             try {
-                // Step 1: Get LIFF ID and initialize
+                // Step 1: Extract token from URL BEFORE LIFF init
+                // IMPORTANT: LIFF init may clear URL query parameters
+                const token = getTokenFromUrl();
+                console.log('Token extracted before LIFF init:', token ? 'found' : 'not found');
+
+                // Step 2: Get LIFF ID and initialize
                 const liffId = await getLiffId();
                 
                 if (!liffId) {
@@ -301,21 +308,19 @@
                 await liff.init({ liffId });
                 console.log('LIFF initialized successfully');
 
-                // Step 2: Extract token from URL
-                const token = getTokenFromUrl();
-
+                // Step 3: Validate token exists
                 if (!token) {
                     showError('驗證連結無效', '缺少驗證碼參數');
                     return;
                 }
 
-                // Step 3: Call verification API
+                // Step 4: Call verification API
                 const result = await verifyToken(token);
 
-                // Step 4: Handle success
+                // Step 5: Handle success
                 showState('success');
 
-                // Step 5: Close window after delay
+                // Step 6: Close window after delay
                 setTimeout(() => {
                     closeWindow();
                 }, CLOSE_DELAY_MS);

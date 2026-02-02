@@ -12,10 +12,12 @@ Identity Strategy:
 
 import hashlib
 import logging
+import os
 from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 from sqlalchemy import select
@@ -152,6 +154,9 @@ class AuthService:
 
         # LINE Channel ID for token verification (aud check)
         self._line_channel_id = self._config_loader.get("line.channel_id", "")
+        
+        # Helper for LIFF deep link generation
+        self._liff_id_verify = os.getenv("ADMIN_LINE_LIFF_ID_VERIFY", "")
 
         # HTTP client for LINE API calls
         self._http_client: httpx.AsyncClient | None = None
@@ -477,10 +482,21 @@ class AuthService:
         return f"{masked_local}@{domain}"
 
     def generate_magic_link(self, email: str, line_sub: str) -> str:
-        """Generate a magic link URL with signed JWT token."""
+        """
+        Generate a magic link URL with signed JWT token.
+        
+        If ADMIN_LINE_LIFF_ID_VERIFY is configured, returns a LIFF deep link.
+        Otherwise, returns a standard web link.
+        """
         from core.services.auth_token import create_magic_link_token
 
         token = create_magic_link_token(email, line_sub)
+
+        # Prefer LIFF deep link if configured
+        if self._liff_id_verify:
+            query_params = urlencode({"token": token})
+            return f"https://liff.line.me/{self._liff_id_verify}?{query_params}"
+
         base_url = self._config_loader.get("server.base_url", "")
         return f"{base_url}/auth/verify?token={token}"
 
@@ -635,6 +651,7 @@ class AuthService:
         ragic_writer = get_user_ragic_writer()
         try:
             ragic_id = await ragic_writer.create_user_in_ragic(
+                http_client=self._client,
                 local_db_id=user.id,
                 email=email,  # Plain text to Ragic
                 line_user_id=line_sub,  # Plain text to Ragic
@@ -690,6 +707,7 @@ class AuthService:
             ragic_writer = get_user_ragic_writer()
             try:
                 success = await ragic_writer.update_user_in_ragic(
+                    http_client=self._client,
                     ragic_id=user.ragic_id,
                     local_db_id=user.id,
                     email=email,  # Plain text to Ragic
@@ -710,6 +728,7 @@ class AuthService:
             ragic_writer = get_user_ragic_writer()
             try:
                 ragic_id = await ragic_writer.create_user_in_ragic(
+                    http_client=self._client,
                     local_db_id=user.id,
                     email=email,
                     line_user_id=line_sub,
