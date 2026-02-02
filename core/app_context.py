@@ -192,18 +192,25 @@ class AppContext:
                 async def handler(ragic: RagicServiceDep): ...
                 
             For background tasks:
-                from core.http_client import get_global_http_client
+                from core.http_client import create_standalone_http_client
                 from core.ragic.service import RagicService
-                service = RagicService(http_client=get_global_http_client())
+                
+                async with create_standalone_http_client() as http_client:
+                    service = RagicService(http_client=http_client)
+        
+        Raises:
+            RuntimeError: Always raises as global client is no longer supported.
         """
         warnings.warn(
             "AppContext.ragic_service is deprecated. Use RagicServiceDep dependency injection.",
             DeprecationWarning,
             stacklevel=2,
         )
-        from core.http_client import get_global_http_client
-        from core.ragic.service import RagicService
-        return RagicService(http_client=get_global_http_client())
+        raise RuntimeError(
+            "AppContext.ragic_service is no longer supported. "
+            "Use RagicServiceDep for FastAPI routes, or create_standalone_http_client() "
+            "for background tasks with explicit HTTP client injection."
+        )
     
     # -------------------------------------------------------------------------
     # Logging (delegates to LogService)

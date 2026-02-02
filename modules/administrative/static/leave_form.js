@@ -367,13 +367,17 @@
             debugLog('User data loaded successfully');
 
             document.getElementById('user-name').textContent = data.name || '-';
-            document.getElementById('user-dept').textContent = data.department || '-';
             document.getElementById('user-email').textContent = data.email || '-';
+            document.getElementById('user-sales-dept').textContent = data.sales_dept || '-';
+            document.getElementById('user-sales-dept-manager').textContent = data.sales_dept_manager || '-';
+            document.getElementById('user-direct-supervisor').textContent = data.direct_supervisor || '-';
 
-            // Set default date to tomorrow
+            // Set default dates to tomorrow
             const tomorrow = new Date();
             tomorrow.setDate(tomorrow.getDate() + 1);
-            document.getElementById('leave-date').value = tomorrow.toISOString().split('T')[0];
+            const tomorrowStr = tomorrow.toISOString().split('T')[0];
+            document.getElementById('start-date').value = tomorrowStr;
+            document.getElementById('end-date').value = tomorrowStr;
 
             showForm();
 
@@ -420,10 +424,9 @@
 
         try {
             const formData = {
-                leave_date: document.getElementById('leave-date').value,
+                start_date: document.getElementById('start-date').value,
+                end_date: document.getElementById('end-date').value,
                 leave_type: document.getElementById('leave-type').value,
-                start_time: document.getElementById('start-time').value,
-                end_time: document.getElementById('end-time').value,
                 reason: document.getElementById('reason').value,
             };
 

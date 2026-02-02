@@ -4,6 +4,12 @@ Ragic Sync Base Infrastructure.
 Provides abstract base class for Ragic sync services and a centralized
 SyncManager for coordinating all module syncs.
 
+Design Principles:
+    1. Explicit Dependency Injection - services receive HTTP clients, not fetch them
+    2. RAII-style Resource Management - background workers own their HTTP clients
+    3. Stateless Services - sync services are logic controllers, not resource owners
+    4. Scope-bound Resources - HTTP clients are bound to their event loop/thread
+
 This is part of the core framework - modules should inherit from
 BaseRagicSyncService and register with SyncManager.
 """
@@ -17,13 +23,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, Generic, List, Optional, Type, TypeVar
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import Base, get_thread_local_session
 from core.ragic.service import RagicService, create_ragic_service
-from core.http_client import get_global_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +88,12 @@ class BaseRagicSyncService(ABC, Generic[ModelT]):
     """
     Abstract base class for Ragic sync services.
     
+    Design Philosophy:
+        This class follows the "Stateless Logic Controller" pattern.
+        It does NOT own HTTP clients - clients are injected per-operation.
+        This allows the same service instance to be used across different
+        execution contexts (main thread, background threads) safely.
+    
     Provides common functionality for:
     - Fetching records from Ragic API
     - Mapping records to SQLAlchemy models
@@ -104,12 +116,16 @@ class BaseRagicSyncService(ABC, Generic[ModelT]):
     def __init__(
         self,
         model_class: Type[ModelT],
-        ragic_service: Optional[RagicService] = None,
         form_key: Optional[str] = None,
     ) -> None:
+        """
+        Initialize the sync service.
+        
+        Args:
+            model_class: The SQLAlchemy model class to sync.
+            form_key: Optional form key for RagicRegistry lookup.
+        """
         self._model_class = model_class
-        # Lazy initialization - service created on first use if not provided
-        self._ragic_service = ragic_service
         self._form_key = form_key
         self._registry = None
         
@@ -121,16 +137,20 @@ class BaseRagicSyncService(ABC, Generic[ModelT]):
         else:
             self._form_config = None
     
-    def _get_ragic_service(self) -> RagicService:
+    def _create_ragic_service(self, http_client: httpx.AsyncClient) -> RagicService:
         """
-        Get a RagicService instance for the current event loop.
+        Create a RagicService with the provided HTTP client.
         
-        NOTE: Does not cache the service because different event loops
-        (main thread vs background sync thread) require different HTTP clients.
-        Each call creates a new service using the appropriate client for
-        the current execution context.
+        This is the ONLY way to get a RagicService within this class.
+        The HTTP client MUST be provided by the caller, ensuring proper
+        lifecycle management and event loop binding.
+        
+        Args:
+            http_client: HTTP client bound to the current event loop.
+        
+        Returns:
+            RagicService instance.
         """
-        http_client = get_global_http_client()
         return create_ragic_service(http_client)
         
     @abstractmethod
@@ -212,9 +232,16 @@ class BaseRagicSyncService(ABC, Generic[ModelT]):
     # Sync Operations
     # =========================================================================
     
-    async def sync_all_data(self) -> SyncResult:
+    async def sync_all_data(
+        self,
+        http_client: httpx.AsyncClient,
+    ) -> SyncResult:
         """
         Sync all records from Ragic to local database.
+        
+        Args:
+            http_client: HTTP client for API requests (REQUIRED).
+                        Must be bound to the current event loop.
         
         Returns:
             SyncResult with statistics.
@@ -235,7 +262,7 @@ class BaseRagicSyncService(ABC, Generic[ModelT]):
         
         try:
             # Fetch all records from Ragic (with naming=EID to get field IDs)
-            ragic_service = self._get_ragic_service()
+            ragic_service = self._create_ragic_service(http_client)
             records = await ragic_service.get_records_by_url(
                 form_url, 
                 params={"naming": "EID"}
@@ -285,7 +312,11 @@ class BaseRagicSyncService(ABC, Generic[ModelT]):
         
         return result
     
-    async def sync_single_record(self, ragic_id: int) -> Optional[ModelT]:
+    async def sync_single_record(
+        self,
+        ragic_id: int,
+        http_client: httpx.AsyncClient,
+    ) -> Optional[ModelT]:
         """
         Sync a single record from Ragic by ID.
         
@@ -293,6 +324,7 @@ class BaseRagicSyncService(ABC, Generic[ModelT]):
         
         Args:
             ragic_id: The Ragic record ID.
+            http_client: HTTP client for API requests (REQUIRED).
         
         Returns:
             The synced model instance, or None on failure.
@@ -308,7 +340,7 @@ class BaseRagicSyncService(ABC, Generic[ModelT]):
         
         try:
             # Fetch the record
-            ragic_service = self._get_ragic_service()
+            ragic_service = self._create_ragic_service(http_client)
             record = await ragic_service.get_record(sheet_path, ragic_id)
             
             if not record:
@@ -520,12 +552,17 @@ class RagicSyncManager:
     # Sync Operations
     # =========================================================================
     
-    async def sync_service(self, key: str) -> Optional[SyncResult]:
+    async def sync_service(
+        self,
+        key: str,
+        http_client: httpx.AsyncClient,
+    ) -> Optional[SyncResult]:
         """
         Trigger sync for a specific service.
         
         Args:
             key: Service key.
+            http_client: HTTP client for API requests (REQUIRED).
         
         Returns:
             SyncResult or None if service not found.
@@ -538,7 +575,7 @@ class RagicSyncManager:
         info.status = "syncing"
         
         try:
-            result = await info.service.sync_all_data()
+            result = await info.service.sync_all_data(http_client)
             info.last_sync_time = datetime.now()
             info.last_sync_result = result
             info.status = "idle" if result.errors == 0 else "error"
@@ -551,11 +588,16 @@ class RagicSyncManager:
             info.last_sync_result = error_result
             return error_result
     
-    async def sync_all(self, auto_only: bool = True) -> Dict[str, SyncResult]:
+    async def sync_all(
+        self,
+        http_client: httpx.AsyncClient,
+        auto_only: bool = True,
+    ) -> Dict[str, SyncResult]:
         """
         Sync all registered services.
         
         Args:
+            http_client: HTTP client for API requests (REQUIRED).
             auto_only: If True, only sync services with auto_sync_on_startup=True.
         
         Returns:
@@ -568,7 +610,7 @@ class RagicSyncManager:
                 continue
             
             logger.info(f"Running sync for: {key}")
-            result = await self.sync_service(key)
+            result = await self.sync_service(key, http_client)
             if result:
                 results[key] = result
         
@@ -579,47 +621,63 @@ class RagicSyncManager:
         Start background sync for all registered services.
         
         Runs in a separate thread to avoid blocking app startup.
+        
+        RAII Pattern Implementation:
+            The background worker creates its OWN HTTP client, which lives
+            for the duration of the sync operation. This ensures:
+            1. No event loop binding conflicts
+            2. Clean resource cleanup on completion
+            3. Thread isolation - no shared mutable state
         """
         if self._startup_complete:
             return
         
-        def sync_worker():
+        def sync_worker() -> None:
+            """
+            Background sync worker function.
+            
+            Creates an isolated event loop and HTTP client for this thread.
+            The HTTP client's lifecycle is bound to this function's scope (RAII).
+            """
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
-            # Create a new HTTP client for this thread's event loop
-            # Cannot reuse the global client as it's bound to the main event loop
-            import httpx
-            http_client = httpx.AsyncClient(
-                timeout=30.0,
-                limits=httpx.Limits(max_connections=50, max_keepalive_connections=20),
-            )
-            
-            # Set this client as the global client for this thread
-            from core.http_client import set_global_http_client
-            set_global_http_client(http_client)
+            async def run_sync() -> None:
+                """
+                Execute sync operations with RAII-managed HTTP client.
+                
+                Uses async with to ensure proper client cleanup regardless
+                of success or failure.
+                """
+                from core.http_client import create_standalone_http_client
+                
+                # RAII: HTTP client lifecycle is bound to this async with block
+                async with create_standalone_http_client(
+                    timeout=30.0,
+                    max_connections=50,
+                    max_keepalive_connections=20,
+                ) as http_client:
+                    logger.info("Starting background sync for all services...")
+                    
+                    # Pass HTTP client explicitly - no global state!
+                    results = await self.sync_all(
+                        http_client=http_client,
+                        auto_only=True,
+                    )
+                    
+                    for key, result in results.items():
+                        logger.info(
+                            f"[{key}] Sync complete: "
+                            f"{result.synced} synced, {result.errors} errors"
+                        )
             
             try:
-                logger.info("Starting background sync for all services...")
-                
-                results = loop.run_until_complete(self.sync_all(auto_only=True))
-                
-                for key, result in results.items():
-                    logger.info(
-                        f"[{key}] Sync complete: "
-                        f"{result.synced} synced, {result.errors} errors"
-                    )
+                loop.run_until_complete(run_sync())
                     
             except Exception as e:
                 logger.exception(f"Background sync failed: {e}")
                 
             finally:
-                # Cleanup HTTP client
-                try:
-                    loop.run_until_complete(http_client.aclose())
-                except Exception as e:
-                    logger.warning(f"Error closing HTTP client: {e}")
-                
                 # Cleanup thread-local database engine
                 from core.database import dispose_thread_local_engine
                 try:
@@ -642,6 +700,7 @@ class RagicSyncManager:
         self,
         key: str,
         ragic_id: int,
+        http_client: httpx.AsyncClient,
         action: str = "update",
     ) -> Optional[SyncResult]:
         """
@@ -650,6 +709,7 @@ class RagicSyncManager:
         Args:
             key: Service key (e.g., "chatbot_sop").
             ragic_id: The Ragic record ID.
+            http_client: HTTP client for API requests (REQUIRED).
             action: "create", "update", or "delete".
         
         Returns:
@@ -670,7 +730,7 @@ class RagicSyncManager:
                 else:
                     result.skipped = 1
             else:
-                instance = await info.service.sync_single_record(ragic_id)
+                instance = await info.service.sync_single_record(ragic_id, http_client)
                 if instance:
                     result.synced = 1
                 else:

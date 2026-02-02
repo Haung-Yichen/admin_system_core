@@ -16,6 +16,11 @@ Security Note:
 Field Mapping (Ragic -> Local):
     - Ragic stores plain email, line_user_id for admin visibility
     - Local DB encrypts email, line_user_id and stores hashes for lookup
+
+Design Principles:
+    - NO global HTTP client access
+    - HTTP client provided via method injection for sync operations
+    - Stateless service pattern
 """
 
 import logging
@@ -23,6 +28,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Union
 from uuid import UUID
 
+import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,7 +38,6 @@ from core.ragic import get_user_form
 from core.ragic.service import RagicService, create_ragic_service
 from core.ragic.sync_base import BaseRagicSyncService, SyncResult
 from core.security import generate_blind_index
-from core.http_client import get_global_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -224,10 +229,15 @@ class UserSyncService(BaseRagicSyncService[User]):
         1. First try by ragic_id (normal sync scenario)
         2. Then try by UUID (local_db_id stored in Ragic)
         3. Finally try by line_user_id_hash (for records created locally)
+    
+    Design:
+        This is a stateless service - it does NOT hold HTTP clients.
+        HTTP clients are passed via method injection to sync methods.
     """
     
-    def __init__(self, ragic_service: Optional[RagicService] = None) -> None:
-        super().__init__(User, ragic_service)
+    def __init__(self) -> None:
+        """Initialize UserSyncService (no HTTP client needed)."""
+        super().__init__(User)
         self._form_config = get_user_form()
     
     def get_ragic_config(self) -> Dict[str, Any]:
@@ -241,9 +251,15 @@ class UserSyncService(BaseRagicSyncService[User]):
         """Use ragic_id for upsert conflict detection."""
         return "ragic_id"
     
-    async def sync_all_data(self) -> SyncResult:
+    async def sync_all_data(
+        self,
+        http_client: httpx.AsyncClient,
+    ) -> SyncResult:
         """
         Override base sync to add HARD DELETE for removed records.
+        
+        Args:
+            http_client: HTTP client for API requests (REQUIRED).
         
         Sync Strategy:
         1. Fetch all records from Ragic
@@ -273,7 +289,8 @@ class UserSyncService(BaseRagicSyncService[User]):
         
         try:
             # Fetch all records from Ragic
-            records = await self._get_ragic_service().get_records_by_url(
+            ragic_service = self._create_ragic_service(http_client)
+            records = await ragic_service.get_records_by_url(
                 form_url,
                 params={"naming": "EID"}
             )
@@ -621,20 +638,23 @@ class UserRagicWriter:
         - Email and LINE ID are sent as PLAIN TEXT to Ragic
         - This is intentional for admin visibility
         - Local DB remains encrypted
+    
+    Design:
+        HTTP client is provided via method injection, not held as instance state.
+        This ensures proper event loop binding and clean resource management.
     """
     
-    def __init__(self, ragic_service: Optional[RagicService] = None) -> None:
-        self._ragic_service_instance = ragic_service
+    def __init__(self) -> None:
+        """Initialize UserRagicWriter (stateless, no HTTP client)."""
         self._form_config = get_user_form()
     
-    def _get_ragic_service(self) -> RagicService:
-        """Lazy initialization of RagicService."""
-        if self._ragic_service_instance is None:
-            self._ragic_service_instance = create_ragic_service(get_global_http_client())
-        return self._ragic_service_instance
+    def _create_ragic_service(self, http_client: httpx.AsyncClient) -> RagicService:
+        """Create a RagicService with the provided HTTP client."""
+        return create_ragic_service(http_client)
     
     async def create_user_in_ragic(
         self,
+        http_client: httpx.AsyncClient,
         local_db_id: UUID,
         email: str,
         line_user_id: str,
@@ -645,6 +665,7 @@ class UserRagicWriter:
         Create a new User record in Ragic.
         
         Args:
+            http_client: HTTP client for API requests (REQUIRED).
             local_db_id: The local database UUID.
             email: Plain text email.
             line_user_id: Plain text LINE user ID.
@@ -673,7 +694,8 @@ class UserRagicWriter:
         logger.info(f"Creating user in Ragic (local_id: {local_db_id})")
         
         try:
-            result = await self._get_ragic_service().create_record_by_url(
+            ragic_service = self._create_ragic_service(http_client)
+            result = await ragic_service.create_record_by_url(
                 self._form_config.url,
                 payload.to_ragic_dict(),
             )
@@ -702,6 +724,7 @@ class UserRagicWriter:
     
     async def update_user_in_ragic(
         self,
+        http_client: httpx.AsyncClient,
         ragic_id: int,
         local_db_id: UUID,
         email: str,
@@ -714,6 +737,7 @@ class UserRagicWriter:
         Update an existing User record in Ragic.
         
         Args:
+            http_client: HTTP client for API requests (REQUIRED).
             ragic_id: The Ragic record ID to update.
             local_db_id: The local database UUID.
             email: Plain text email.
@@ -742,7 +766,8 @@ class UserRagicWriter:
         logger.info(f"Updating user in Ragic: ragic_id={ragic_id}")
         
         try:
-            success = await self._get_ragic_service().update_record(
+            ragic_service = self._create_ragic_service(http_client)
+            success = await ragic_service.update_record(
                 self._form_config.sheet_path,
                 ragic_id,
                 payload.to_ragic_dict(),
@@ -758,6 +783,7 @@ class UserRagicWriter:
     
     async def find_user_in_ragic_by_line_id(
         self,
+        http_client: httpx.AsyncClient,
         line_user_id: str,
     ) -> Optional[Dict[str, Any]]:
         """
@@ -766,6 +792,7 @@ class UserRagicWriter:
         Uses Ragic's where filter with the key field.
         
         Args:
+            http_client: HTTP client for API requests (REQUIRED).
             line_user_id: The LINE user ID to search for.
         
         Returns:
@@ -773,7 +800,8 @@ class UserRagicWriter:
         """
         try:
             # Ragic filter by key field (line_user_id)
-            records = await self._get_ragic_service().get_records(
+            ragic_service = self._create_ragic_service(http_client)
+            records = await ragic_service.get_records(
                 self._form_config.sheet_path,
                 filters={Fields.LINE_USER_ID: line_user_id},
                 limit=1,

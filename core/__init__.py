@@ -9,11 +9,14 @@ from core import database
 # LINE Client
 from core.line_client import LineClient
 
-# HTTP Client Lifecycle Management
+# HTTP Client Lifecycle Management (RAII Pattern)
 from core.http_client import (
     HttpClientManager,
+    HttpClientProtocol,
     create_http_client_context,
+    create_standalone_http_client,  # For background tasks
     get_http_client_from_app,
+    # Deprecated - kept for backward compatibility
     get_global_http_client,
     set_global_http_client,
     is_http_client_available,
@@ -78,13 +81,16 @@ __all__ = [
     "setup_logging", "database",
     # LINE Client
     "LineClient",
-    # HTTP Client Lifecycle Management
+    # HTTP Client Lifecycle Management (RAII Pattern)
     "HttpClientManager",
+    "HttpClientProtocol",
     "create_http_client_context",
+    "create_standalone_http_client",  # Preferred for background tasks
     "get_http_client_from_app",
-    "get_global_http_client",
-    "set_global_http_client",
-    "is_http_client_available",
+    # Deprecated exports (for backward compatibility only)
+    "get_global_http_client",  # DEPRECATED: Use HttpClientDep or create_standalone_http_client
+    "set_global_http_client",  # DEPRECATED: No-op, will be removed
+    "is_http_client_available",  # DEPRECATED: Check via dependency injection
     # New DI exports
     "IModuleContext", "get_app_context", "IConfigurable", "ILoggable", "ModuleContext",
     "ConfigurationProvider", "LogService", "ServerState", "ServiceProvider", "ProviderRegistry",

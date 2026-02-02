@@ -4,6 +4,11 @@ Ragic Service Factory.
 Factory pattern for creating Ragic service instances based on
 form configuration and sync strategy.
 
+Design Principles:
+    1. Open/Closed Principle - new strategies via new handler classes
+    2. Explicit Dependency Injection - no global HTTP client access
+    3. Factory functions require HTTP client parameter
+
 This module follows the Open/Closed Principle - new strategies can be
 added by creating new handler classes without modifying existing code.
 """
@@ -12,12 +17,13 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Generic, List, Optional, Type, TypeVar
 
+import httpx
+
 from core.ragic.enums import SyncStrategy
 from core.ragic.exceptions import RagicConfigurationError
 from core.ragic.registry import RagicRegistry, get_ragic_registry
 from core.ragic.registry_models import FormConfig
 from core.ragic.service import RagicService, create_ragic_service
-from core.http_client import get_global_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -509,18 +515,31 @@ def get_ragic_service_factory() -> RagicServiceFactory:
     return _factory
 
 
-def create_form_service(form_key: str) -> GenericRagicService:
+def create_form_service(
+    form_key: str,
+    http_client: httpx.AsyncClient,
+) -> GenericRagicService:
     """
-    Convenience function to create a GenericRagicService for a form.
-    
-    Uses the global HTTP client for the underlying RagicService.
+    Create a GenericRagicService for a form.
     
     Args:
         form_key: The form key from ragic_registry.json.
+        http_client: HTTP client for API requests (REQUIRED).
     
     Returns:
         Configured GenericRagicService.
+    
+    Example:
+        # In FastAPI route
+        @router.get("/data")
+        async def get_data(http_client: HttpClientDep):
+            service = create_form_service("my_form", http_client)
+            return await service.fetch_all()
+        
+        # In background task
+        async with create_standalone_http_client() as http_client:
+            service = create_form_service("my_form", http_client)
+            await service.fetch_all()
     """
-    http_client = get_global_http_client()
     ragic_service = create_ragic_service(http_client)
     return GenericRagicService(form_key, ragic_service=ragic_service)

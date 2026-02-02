@@ -1,25 +1,34 @@
 """
 HTTP Client Lifecycle Management.
 
-Provides a properly lifecycle-managed httpx.AsyncClient for use across the application.
-This follows FastAPI best practices by:
-1. Using lifespan events to manage client lifecycle
-2. Storing client in app.state for access
-3. Providing dependency injection for services
+Provides RAII-style lifecycle-managed httpx.AsyncClient for use across the application.
+Follows the principle that resource lifecycle should be explicitly bound to its scope,
+avoiding global/thread-local state anti-patterns.
+
+Design Principles:
+    1. NO global singletons or thread-local storage
+    2. Resources are bound to their owning scope (Event Loop/Thread)
+    3. Explicit dependency injection - no implicit state
+    4. RAII pattern: acquisition = initialization, release = scope exit
 
 Usage:
-    # In main.py lifespan:
-    async with create_http_client_context(app):
+    # In main.py lifespan (main thread):
+    async with create_http_client_context(app) as http_manager:
         yield
     
-    # In dependencies:
+    # In FastAPI routes (via dependency injection):
     def get_http_client(request: Request) -> httpx.AsyncClient:
         return request.app.state.http_client
+    
+    # In background threads (create isolated client):
+    async with create_standalone_http_client() as client:
+        service = RagicService(http_client=client)
+        await service.do_work()
 """
 
 import logging
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, AsyncGenerator, Optional
+from typing import TYPE_CHECKING, AsyncGenerator, Optional, Protocol, runtime_checkable
 
 import httpx
 
@@ -27,6 +36,44 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Protocol Definitions (for Type Safety and Testability)
+# =============================================================================
+
+
+@runtime_checkable
+class HttpClientProtocol(Protocol):
+    """
+    Protocol for HTTP client operations.
+    
+    Allows mocking in tests and abstracting the actual client implementation.
+    """
+    
+    async def get(
+        self,
+        url: str,
+        *,
+        params: Optional[dict] = None,
+        headers: Optional[dict] = None,
+        timeout: Optional[float] = None,
+    ) -> httpx.Response: ...
+    
+    async def post(
+        self,
+        url: str,
+        *,
+        json: Optional[dict] = None,
+        data: Optional[dict] = None,
+        headers: Optional[dict] = None,
+        timeout: Optional[float] = None,
+    ) -> httpx.Response: ...
+    
+    @property
+    def is_closed(self) -> bool: ...
+    
+    async def aclose(self) -> None: ...
 
 
 class HttpClientManager:
@@ -157,6 +204,58 @@ async def create_http_client_context(
             delattr(app.state, "http_client_manager")
 
 
+@asynccontextmanager
+async def create_standalone_http_client(
+    timeout: float = 30.0,
+    max_connections: int = 50,
+    max_keepalive_connections: int = 20,
+    keepalive_expiry: float = 30.0,
+) -> AsyncGenerator[httpx.AsyncClient, None]:
+    """
+    Create a standalone HTTP client for isolated execution contexts.
+    
+    This follows RAII pattern: the client lifecycle is bound to the context manager scope.
+    Use this for background threads/tasks that need their own HTTP client.
+    
+    Args:
+        timeout: Request timeout in seconds.
+        max_connections: Maximum concurrent connections.
+        max_keepalive_connections: Maximum keep-alive connections.
+        keepalive_expiry: Keep-alive connection expiry in seconds.
+    
+    Yields:
+        httpx.AsyncClient instance bound to the caller's event loop.
+    
+    Example:
+        async def background_worker():
+            async with create_standalone_http_client() as client:
+                service = RagicService(http_client=client)
+                await service.sync_data()
+    """
+    limits = httpx.Limits(
+        max_connections=max_connections,
+        max_keepalive_connections=max_keepalive_connections,
+        keepalive_expiry=keepalive_expiry,
+    )
+    
+    client = httpx.AsyncClient(
+        timeout=timeout,
+        limits=limits,
+        follow_redirects=True,
+    )
+    
+    logger.debug(
+        f"Standalone HTTP client created (timeout={timeout}s, "
+        f"max_connections={max_connections})"
+    )
+    
+    try:
+        yield client
+    finally:
+        await client.aclose()
+        logger.debug("Standalone HTTP client closed")
+
+
 def get_http_client_from_app(app: "FastAPI") -> httpx.AsyncClient:
     """
     Get HTTP client from FastAPI app state.
@@ -178,66 +277,74 @@ def get_http_client_from_app(app: "FastAPI") -> httpx.AsyncClient:
 
 
 # =============================================================================
-# Module-level singleton for non-request contexts (background tasks, etc.)
-# Uses thread-local storage to support background sync threads with their own clients
+# Deprecated Functions (for backward compatibility during migration)
 # =============================================================================
 
-import threading
+import warnings
+from typing import Callable
 
-_global_http_client: Optional[httpx.AsyncClient] = None
-_thread_local = threading.local()
+_deprecation_warned: set[str] = set()
+
+
+def _warn_deprecation(func_name: str, alternative: str) -> None:
+    """Issue deprecation warning once per function."""
+    if func_name not in _deprecation_warned:
+        _deprecation_warned.add(func_name)
+        warnings.warn(
+            f"{func_name}() is deprecated. {alternative}",
+            DeprecationWarning,
+            stacklevel=3,
+        )
 
 
 def set_global_http_client(client: Optional[httpx.AsyncClient]) -> None:
     """
-    Set the HTTP client reference for the current thread.
+    DEPRECATED: Global HTTP client is an anti-pattern.
     
-    In the main thread (lifespan), this also sets the global default.
-    In background threads, this sets a thread-local client.
-    
-    Args:
-        client: The HTTP client or None to clear.
+    This function is kept for backward compatibility but will be removed.
+    Use explicit dependency injection instead:
+    - FastAPI routes: Use HttpClientDep
+    - Background tasks: Use create_standalone_http_client()
     """
-    global _global_http_client
-    
-    # Always set thread-local
-    _thread_local.http_client = client
-    
-    # In main thread, also set global (for backward compatibility)
-    if threading.current_thread() is threading.main_thread():
-        _global_http_client = client
+    _warn_deprecation(
+        "set_global_http_client",
+        "Use create_standalone_http_client() for background tasks."
+    )
+    # No-op: we no longer maintain global state
 
 
 def get_global_http_client() -> httpx.AsyncClient:
     """
-    Get the HTTP client for the current thread.
+    DEPRECATED: Global HTTP client is an anti-pattern.
     
-    First checks thread-local storage (for background sync threads),
-    then falls back to the global client (set by main thread lifespan).
-    
-    Returns:
-        The httpx.AsyncClient for this thread.
+    This function is kept for backward compatibility but will be removed.
+    Use explicit dependency injection instead:
+    - FastAPI routes: Use HttpClientDep
+    - Background tasks: Use create_standalone_http_client()
     
     Raises:
-        RuntimeError: If HTTP client is not available.
+        RuntimeError: Always raises as global client is no longer supported.
     """
-    # Check thread-local first
-    thread_client = getattr(_thread_local, 'http_client', None)
-    if thread_client is not None:
-        return thread_client
-    
-    # Fall back to global
-    if _global_http_client is None:
-        raise RuntimeError(
-            "Global HTTP client not available. "
-            "Ensure the application lifespan has started."
-        )
-    return _global_http_client
+    _warn_deprecation(
+        "get_global_http_client",
+        "Use dependency injection (HttpClientDep) or create_standalone_http_client()."
+    )
+    raise RuntimeError(
+        "Global HTTP client is no longer supported. "
+        "Use dependency injection (HttpClientDep) for FastAPI routes, "
+        "or create_standalone_http_client() for background tasks."
+    )
 
 
 def is_http_client_available() -> bool:
-    """Check if an HTTP client is available for the current thread."""
-    thread_client = getattr(_thread_local, 'http_client', None)
-    if thread_client is not None:
-        return not thread_client.is_closed
-    return _global_http_client is not None and not _global_http_client.is_closed
+    """
+    DEPRECATED: Global HTTP client check is an anti-pattern.
+    
+    Returns:
+        Always False as global client is no longer supported.
+    """
+    _warn_deprecation(
+        "is_http_client_available",
+        "Check client availability through your injected dependency."
+    )
+    return False

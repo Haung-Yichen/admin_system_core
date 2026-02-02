@@ -21,10 +21,7 @@ from fastapi.staticfiles import StaticFiles
 
 from core.app_context import AppContext
 from core.database import close_db_connections, init_database
-from core.http_client import (
-    create_http_client_context,
-    set_global_http_client,
-)
+from core.http_client import create_http_client_context
 from core.logging_config import setup_logging
 from core.registry import ModuleLoader, ModuleRegistry
 from core.server import create_base_app, set_registry
@@ -153,11 +150,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Starting Admin System Core...")
 
     # Initialize HTTP client with proper lifecycle management
-    # This replaces the singleton pattern in RagicService
+    # The HTTP client is stored in app.state for dependency injection in routes
+    # Background tasks create their own isolated clients (RAII pattern)
     async with create_http_client_context(app, timeout=30.0, max_connections=100) as http_manager:
-        # Make HTTP client available globally for background tasks
-        set_global_http_client(http_manager.client)
-        logger.info("HTTP client initialized")
+        logger.info("HTTP client initialized (stored in app.state for DI)")
 
         try:
             await init_database()
@@ -171,6 +167,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("Core sync services registered")
 
         # Start background sync for all registered Ragic services
+        # Note: Background sync creates its own HTTP client (thread isolation)
         from core.ragic import get_sync_manager
         sync_manager = get_sync_manager()
         sync_manager.start_background_sync()
@@ -191,9 +188,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         # Shutdown
         logger.info("Shutting down Admin System Core...")
-
-        # Clear global HTTP client reference before closing
-        set_global_http_client(None)
 
         if _registry:
             _registry.shutdown_all()

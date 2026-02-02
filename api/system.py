@@ -300,11 +300,11 @@ async def get_dashboard_data(
     # Core services health check
     services: list[ServiceHealth] = []
     
-    # Check Ragic
+    # Check Ragic (requires HTTP client from request)
     try:
         from core.ragic.service import create_ragic_service
-        from core.http_client import get_global_http_client
-        ragic_service = create_ragic_service(get_global_http_client())
+        http_client = request.app.state.http_client
+        ragic_service = create_ragic_service(http_client)
         ragic_health = await ragic_service.check_connection()
         services.append(ServiceHealth(
             name="Ragic",

@@ -26,7 +26,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from core.dependencies import WebhookAuthDep
+from core.dependencies import HttpClientDep, WebhookAuthDep
 from core.ragic.sync_base import get_sync_manager
 from core.ragic.registry import get_ragic_registry
 from core.security.webhook import WebhookAuthContext
@@ -71,6 +71,7 @@ class SyncTriggerResponse(BaseModel):
 async def ragic_webhook(
     request: Request,
     auth: WebhookAuthDep,
+    http_client: HttpClientDep,
 ) -> WebhookResponse:
     """
     Handle Ragic webhook notifications.
@@ -135,7 +136,7 @@ async def ragic_webhook(
         if not ragic_id:
             # No ragic_id provided - trigger full sync instead
             logger.info(f"Webhook missing ragic_id, triggering full sync for '{source}'")
-            result = await sync_manager.sync_service(source)
+            result = await sync_manager.sync_service(source, http_client)
             
             if result and result.errors == 0:
                 return WebhookResponse(
@@ -158,7 +159,7 @@ async def ragic_webhook(
         # Determine action
         action = str(data.get("action", "update")).lower()
         
-        result = await sync_manager.handle_webhook(source, ragic_id, action)
+        result = await sync_manager.handle_webhook(source, ragic_id, http_client, action)
         
         if result and result.errors == 0:
             if result.deleted > 0:
@@ -193,6 +194,7 @@ async def ragic_webhook(
 @router.post("/ragic/sync", response_model=SyncTriggerResponse)
 async def trigger_sync(
     request: Request,
+    http_client: HttpClientDep,
     source: Optional[str] = Query(None, description="Specific service to sync, or all if omitted"),
     api_key: Optional[str] = Query(None, description="API key for authentication", alias="key"),
 ) -> SyncTriggerResponse:
@@ -262,7 +264,7 @@ async def trigger_sync(
                     detail=f"Sync service '{source}' not found"
                 )
             
-            result = await sync_manager.sync_service(source)
+            result = await sync_manager.sync_service(source, http_client)
             
             return SyncTriggerResponse(
                 success=result.errors == 0 if result else False,
@@ -271,7 +273,7 @@ async def trigger_sync(
             )
         else:
             # Sync all services
-            results = await sync_manager.sync_all(auto_only=False)
+            results = await sync_manager.sync_all(http_client, auto_only=False)
             
             return SyncTriggerResponse(
                 success=all(r.errors == 0 for r in results.values()),

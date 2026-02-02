@@ -6,9 +6,10 @@ This is the unified service that replaces both:
 - core/services/ragic.py (employee verification)
 - services/ragic_service.py (generic CRUD)
 
-Lifecycle Management:
-    RagicService requires httpx.AsyncClient via dependency injection.
-    The HTTP client is managed by FastAPI's lifespan events.
+Design Principles:
+    RagicService requires httpx.AsyncClient via EXPLICIT dependency injection.
+    It does NOT fetch clients from global state or thread-local storage.
+    The HTTP client lifecycle is managed by the caller.
     
     Usage in FastAPI routes:
         @router.get("/data")
@@ -16,8 +17,11 @@ Lifecycle Management:
             return await ragic.get_records("/forms/1")
     
     Usage in background tasks:
-        from core.http_client import get_global_http_client
-        service = RagicService(http_client=get_global_http_client())
+        from core.http_client import create_standalone_http_client
+        
+        async with create_standalone_http_client() as http_client:
+            service = RagicService(http_client=http_client)
+            await service.get_records("/forms/1")
 """
 
 import logging
@@ -54,7 +58,7 @@ class RagicService:
         if http_client is None:
             raise ValueError(
                 "http_client is required. Use dependency injection via RagicServiceDep "
-                "or get_global_http_client() for background tasks."
+                "in FastAPI routes, or create_standalone_http_client() for background tasks."
             )
         
         self._client = http_client
@@ -530,19 +534,27 @@ def create_ragic_service(http_client: httpx.AsyncClient) -> RagicService:
     """
     Factory function to create RagicService with HTTP client.
     
-    Use this for background tasks where dependency injection isn't available.
-    
     Args:
-        http_client: Shared HTTP client from get_global_http_client().
+        http_client: HTTP client instance (REQUIRED).
+                    For FastAPI routes, get from HttpClientDep.
+                    For background tasks, use create_standalone_http_client().
     
     Returns:
         RagicService instance.
     
     Example:
-        from core.http_client import get_global_http_client
-        from core.ragic.service import create_ragic_service
+        # In FastAPI route (dependency injection)
+        @router.get("/data")
+        async def get_data(http_client: HttpClientDep):
+            service = create_ragic_service(http_client)
+            return await service.get_records("/forms/1")
         
-        service = create_ragic_service(get_global_http_client())
+        # In background task (RAII pattern)
+        from core.http_client import create_standalone_http_client
+        
+        async with create_standalone_http_client() as http_client:
+            service = create_ragic_service(http_client)
+            await service.sync_data()
     """
     return RagicService(http_client=http_client)
 

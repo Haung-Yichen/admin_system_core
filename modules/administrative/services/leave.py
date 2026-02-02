@@ -8,23 +8,24 @@ Authentication is handled by the Router layer via LINE ID Token (OIDC).
 This service receives the verified email directly and uses it to look up
 the employee profile from the local cache.
 
-Note:
-    This service uses the framework's core.ragic.RagicService for all
-    Ragic API communication instead of managing HTTP clients directly.
+Design Principles:
+    - NO global HTTP client access
+    - HTTP client is provided via dependency injection or method injection
+    - Stateless service pattern for thread safety
 """
 
 import logging
 import os
 import time
-from typing import Any
+from typing import Any, Optional
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_standalone_session
 from core.ragic import RagicService
 from core.ragic.service import create_ragic_service
-from core.http_client import get_global_http_client
 from core.security import generate_blind_index
 from modules.administrative.core.config import (
     AdminSettings,
@@ -67,6 +68,10 @@ class LeaveService:
         1. Router verifies LINE ID Token -> Email
         2. Email -> Module Cache -> Account Profile (includes org info)
         3. Construct payload and submit to Ragic
+    
+    Design:
+        HTTP client is injected per-method call. The service does NOT hold
+        HTTP client state to ensure thread safety and proper event loop binding.
     """
 
     def __init__(
@@ -81,31 +86,30 @@ class LeaveService:
         """
         self._settings = settings or get_admin_settings()
         
-        # Lazy initialization - RagicService will be created on first use
-        self._ragic_service: RagicService | None = None
-        
         # Schema cache for form validation
         self._form_schema_cache: dict[str, Any] | None = None
         self._schema_cache_time: float = 0
         self._schema_cache_ttl: int = 300  # 5 minutes cache
     
-    def _get_ragic_service(self) -> RagicService:
-        """Get or create RagicService with lazy initialization."""
-        if self._ragic_service is None:
-            self._ragic_service = create_ragic_service(
-                http_client=get_global_http_client(),
-                api_key=self._settings.ragic_api_key.get_secret_value(),
-                timeout=float(self._settings.sync_timeout_seconds),
-            )
-        return self._ragic_service
+    def _create_ragic_service(self, http_client: httpx.AsyncClient) -> RagicService:
+        """
+        Create RagicService with the provided HTTP client.
+        
+        Args:
+            http_client: HTTP client bound to the current event loop.
+        
+        Returns:
+            Configured RagicService instance.
+        """
+        return create_ragic_service(http_client)
 
     async def close(self) -> None:
-        """Close the Ragic service HTTP client.
+        """Close the service.
         
-        Note: With shared HTTP client, this is a no-op.
-        The client lifecycle is managed by the application lifespan.
+        Note: With injected HTTP client, this is a no-op.
+        The client lifecycle is managed by the caller.
         """
-        pass  # Shared client - no cleanup needed
+        pass
 
     # =========================================================================
     # Account Profile Lookup
@@ -253,10 +257,16 @@ class LeaveService:
     # Helper Methods
     # =========================================================================
     
-    async def _get_leave_form_schema(self) -> dict[str, Any]:
+    async def _get_leave_form_schema(
+        self,
+        http_client: httpx.AsyncClient,
+    ) -> dict[str, Any]:
         """
         Fetch leave form schema from Ragic to validate options.
         Uses simple caching to reduce API calls.
+        
+        Args:
+            http_client: HTTP client for API requests.
         """
         current_time = time.time()
         if (self._form_schema_cache and 
@@ -265,7 +275,8 @@ class LeaveService:
             
         try:
             logger.info(f"Fetching Ragic form schema from {self._settings.ragic_url_leave}")
-            self._form_schema_cache = await self._get_ragic_service().get_form_schema(
+            ragic_service = self._create_ragic_service(http_client)
+            self._form_schema_cache = await ragic_service.get_form_schema(
                 full_url=self._settings.ragic_url_leave
             )
             self._schema_cache_time = current_time
@@ -277,6 +288,7 @@ class LeaveService:
 
     async def _resolve_selection_option(
         self, 
+        http_client: httpx.AsyncClient,
         field_id: str, 
         target_value: str,
         default_value: str | None = None
@@ -284,8 +296,14 @@ class LeaveService:
         """
         Check if target_value is valid for the given field in Ragic.
         Return the exact string from Ragic if found, to avoid substring/case issues.
+        
+        Args:
+            http_client: HTTP client for API requests.
+            field_id: Ragic field ID.
+            target_value: Value to look up.
+            default_value: Default value if not found.
         """
-        schema = await self._get_leave_form_schema()
+        schema = await self._get_leave_form_schema(http_client)
         
         # Schema structure in Ragic ?info=1:
         # It returns a dictionary where keys are field IDs (sometimes) or indices.
@@ -510,6 +528,7 @@ class LeaveService:
 
     async def submit_leave_request(
         self,
+        http_client: httpx.AsyncClient,
         email: str,
         leave_dates: list[str],
         reason: str,
@@ -528,6 +547,7 @@ class LeaveService:
             5. POST to Ragic Leave Request form for each date
 
         Args:
+            http_client: HTTP client for API requests (REQUIRED).
             email: Verified user email (from LINE ID Token authentication).
             leave_dates: List of leave dates (YYYY-MM-DD format).
             reason: Reason for leave.
@@ -600,6 +620,7 @@ class LeaveService:
         # This prevents "Selection value invalid" errors by ensuring we send the exact string
         # Changed from "審核中" to "已上傳" per user request
         resolved_approval_status = await self._resolve_selection_option(
+            http_client,
             RagicLeaveFieldMapping.APPROVAL_STATUS, 
             "已上傳"
         )
@@ -608,6 +629,7 @@ class LeaveService:
         resolved_sales_dept = account.sales_dept or ""
         if resolved_sales_dept:
             resolved_sales_dept = await self._resolve_selection_option(
+                http_client,
                 RagicLeaveFieldMapping.SALES_DEPT,
                 resolved_sales_dept
             )
@@ -692,7 +714,8 @@ class LeaveService:
             )
             
             # Use framework's RagicService for submission
-            result = await self._get_ragic_service().create_record_by_url(
+            ragic_service = self._create_ragic_service(http_client)
+            result = await ragic_service.create_record_by_url(
                 full_url=self._settings.ragic_url_leave,
                 data=ragic_payload,
             )
