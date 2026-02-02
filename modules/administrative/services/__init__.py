@@ -2,8 +2,23 @@
 Administrative Module Services.
 
 Contains business logic services for the administrative module.
+
+Sync Services (New Architecture):
+    - AccountSyncService: Syncs employee accounts from Ragic
+    - LeaveTypeSyncService: Syncs leave type master data from Ragic
+    
+Legacy (Deprecated):
+    - RagicSyncService: Wrapper for backward compatibility
 """
 
+from modules.administrative.services.account_sync import (
+    AccountSyncService,
+    get_account_sync_service,
+)
+from modules.administrative.services.leave_type_sync import (
+    LeaveTypeSyncService,
+    get_leave_type_sync_service,
+)
 from modules.administrative.services.ragic_sync import RagicSyncService
 from modules.administrative.services.leave import (
     LeaveService,
@@ -26,16 +41,26 @@ from modules.administrative.services.email_notification import (
 )
 
 __all__ = [
+    # New Sync Services
+    "AccountSyncService",
+    "get_account_sync_service",
+    "LeaveTypeSyncService",
+    "get_leave_type_sync_service",
+    # Legacy (Deprecated)
     "RagicSyncService",
+    # Leave Service
     "LeaveService",
     "get_leave_service",
     "LeaveError",
     "EmployeeNotFoundError",
     "SubmissionError",
+    # Rich Menu
     "RichMenuService",
     "get_rich_menu_service",
+    # LIFF
     "LiffService",
     "get_liff_service",
+    # Email
     "EmailNotificationService",
     "get_email_notification_service",
 ]

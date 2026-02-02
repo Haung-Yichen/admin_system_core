@@ -16,8 +16,8 @@ from core.interface import IAppModule
 from core.ragic import get_sync_manager
 from modules.administrative.core.config import get_admin_settings
 from modules.administrative.routers import leave_router, liff_router
-from modules.administrative.services.ragic_sync import RagicSyncService
-from modules.administrative.services.account_sync import AccountSyncService
+from modules.administrative.services.account_sync import AccountSyncService, get_account_sync_service
+from modules.administrative.services.leave_type_sync import LeaveTypeSyncService, get_leave_type_sync_service
 from modules.administrative.services.rich_menu import RichMenuService
 
 if TYPE_CHECKING:
@@ -47,10 +47,12 @@ class AdministrativeModule(IAppModule):
     def __init__(self) -> None:
         self._context: Optional["AppContext"] = None
         self._api_router: Optional[APIRouter] = None
-        self._sync_service: Optional[RagicSyncService] = None
+        self._account_sync_service: Optional[AccountSyncService] = None
+        self._leave_type_sync_service: Optional[LeaveTypeSyncService] = None
         self._sync_status: dict[str, Any] = {
             "status": "pending",
             "accounts": 0,
+            "leave_types": 0,
             "skipped": 0,
             "last_error": None,
         }
@@ -79,21 +81,36 @@ class AdministrativeModule(IAppModule):
         self._api_router.include_router(leave_router)
         self._api_router.include_router(liff_router)
 
-        # Initialize sync service (legacy full sync)
-        self._sync_service = RagicSyncService()
+        # Initialize sync services (new architecture)
+        self._account_sync_service = get_account_sync_service()
+        self._leave_type_sync_service = get_leave_type_sync_service()
 
-        # Register SyncManager Service (New Webhook support)
+        # Register SyncManager Services (for webhook support and centralized management)
         try:
             sync_manager = get_sync_manager()
+            
+            # Register Account Sync Service
             sync_manager.register(
                 key="administrative_account",
                 name="Employee Accounts",
-                service=AccountSyncService(),
+                service=self._account_sync_service,
                 module_name=self.get_module_name(),
-                auto_sync_on_startup=False, # We use the legacy full sync for now
+                auto_sync_on_startup=False,  # We trigger sync manually in async_startup
             )
+            
+            # Register Leave Type Sync Service
+            sync_manager.register(
+                key="administrative_leave_type",
+                name="Leave Types",
+                service=self._leave_type_sync_service,
+                module_name=self.get_module_name(),
+                auto_sync_on_startup=False,  # We trigger sync manually in async_startup
+            )
+            
+            logger.info("Registered AccountSyncService and LeaveTypeSyncService with SyncManager")
+            
         except Exception as e:
-            logger.error(f"Failed to register AccountSyncService: {e}")
+            logger.error(f"Failed to register sync services with SyncManager: {e}")
 
         # Note: Async tasks (Ragic sync, Rich Menu setup) are deferred to async_startup()
         # because no event loop is running during on_entry()
@@ -126,6 +143,8 @@ class AdministrativeModule(IAppModule):
 
         Uses asyncio.create_task to run the sync operation concurrently
         without blocking the main application startup.
+        
+        Uses the new AccountSyncService and LeaveTypeSyncService architecture.
         """
         async def sync_worker() -> None:
             """Async worker for Ragic data synchronization."""
@@ -133,15 +152,22 @@ class AdministrativeModule(IAppModule):
                 logger.info("Starting Ragic data sync...")
                 self._sync_status["status"] = "syncing"
 
-                result = await self._sync_service.sync_all_data()
+                # Sync accounts using new service
+                account_result = await self._account_sync_service.sync_all_data()
+                self._sync_status["accounts"] = account_result.synced
+                self._sync_status["skipped"] = account_result.skipped
+
+                # Sync leave types using new service
+                leave_type_result = await self._leave_type_sync_service.sync_all_data()
+                self._sync_status["leave_types"] = leave_type_result.synced
+                self._sync_status["skipped"] += leave_type_result.skipped
 
                 self._sync_status["status"] = "completed"
-                self._sync_status["accounts"] = result.get("accounts_synced", 0)
-                self._sync_status["skipped"] = result.get("accounts_skipped", 0)
 
                 logger.info(
                     f"Ragic sync completed: "
                     f"{self._sync_status['accounts']} accounts synced, "
+                    f"{self._sync_status['leave_types']} leave types synced, "
                     f"{self._sync_status['skipped']} skipped"
                 )
 
@@ -439,6 +465,8 @@ class AdministrativeModule(IAppModule):
         details["Sync Status"] = sync_status.title()
         details["Cached Accounts"] = str(
             self._sync_status.get("accounts", 0))
+        details["Cached Leave Types"] = str(
+            self._sync_status.get("leave_types", 0))
         details["Skipped"] = str(
             self._sync_status.get("skipped", 0))
 

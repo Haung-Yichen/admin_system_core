@@ -5,6 +5,18 @@ Manages environment variables specific to the Administrative module.
 Uses prefix ADMIN_ to avoid conflicts with other modules.
 
 Refactored to use RagicRegistry for all Ragic configuration lookups.
+
+IMPORTANT: Field Mapping Migration
+==================================
+The field mapping classes in this file (RagicAccountFieldMapping, RagicLeaveFieldMapping, 
+RagicLeaveTypeFieldMapping) are kept for backward compatibility but are now powered by 
+RagicRegistry through a metaclass. They dynamically load field IDs from ragic_registry.json.
+
+For new code, prefer using the field mapping helpers directly in sync services:
+- AccountSyncService uses AccountFieldMapping (in account_sync.py)
+- LeaveTypeSyncService uses LeaveTypeFieldMapping (in leave_type_sync.py)
+
+These new helpers provide better encapsulation and don't depend on module-level config.
 """
 
 from functools import lru_cache
@@ -63,6 +75,9 @@ class RagicLeaveFieldMapping(metaclass=RagicFieldMappingMeta):
     """
     Ragic Field ID mappings for the Leave Request form.
     
+    NOTE: This class is now powered by RagicRegistry through RagicFieldMappingMeta.
+    Field IDs are loaded dynamically from ragic_registry.json at runtime.
+    
     Access any attribute to get the field ID from the registry.
     Example: RagicLeaveFieldMapping.EMPLOYEE_NAME returns "1005571"
     """
@@ -92,6 +107,12 @@ class RagicLeaveTypeFieldMapping(metaclass=RagicFieldMappingMeta):
     """
     Ragic Field ID mappings for the Leave Type master data form.
     
+    NOTE: This class is now powered by RagicRegistry through RagicFieldMappingMeta.
+    Field IDs are loaded dynamically from ragic_registry.json at runtime.
+    
+    DEPRECATED for sync services: Use LeaveTypeFieldMapping in leave_type_sync.py instead.
+    This class is kept for backward compatibility with other parts of the module.
+    
     Access any attribute to get the field ID from the registry.
     Example: RagicLeaveTypeFieldMapping.LEAVE_TYPE_CODE returns "3005177"
     """
@@ -107,6 +128,12 @@ class RagicLeaveTypeFieldMapping(metaclass=RagicFieldMappingMeta):
 class RagicAccountFieldMapping(metaclass=RagicFieldMappingMeta):
     """
     Ragic Field ID mappings for the unified Account form.
+    
+    NOTE: This class is now powered by RagicRegistry through RagicFieldMappingMeta.
+    Field IDs are loaded dynamically from ragic_registry.json at runtime.
+    
+    DEPRECATED for sync services: Use AccountFieldMapping in account_sync.py instead.
+    This class is kept for backward compatibility with other parts of the module.
     
     Access any attribute to get the field ID from the registry.
     Example: RagicAccountFieldMapping.NAME returns "1000032"
