@@ -45,6 +45,42 @@ services:
       - hsib-network
 
   # ---------------------------------------------------------------------------
+  # Backend API Service
+  # ---------------------------------------------------------------------------
+  backend:
+    build: .
+    container_name: hsib-backend
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/hsib_sop_bot
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8000
+    env_file:
+      - .env
+    depends_on:
+      - db
+    restart: unless-stopped
+    networks:
+      - hsib-network
+
+  # ---------------------------------------------------------------------------
+  # Cloudflare Tunnel
+  # ---------------------------------------------------------------------------
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: hsib-cloudflared
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run
+    restart: unless-stopped
+    networks:
+      - hsib-network
+
+  # ---------------------------------------------------------------------------
   # pgAdmin (Optional - for database management)
   # ---------------------------------------------------------------------------
   pgadmin:
