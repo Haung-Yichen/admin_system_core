@@ -260,6 +260,8 @@ def get_http_client_from_app(app: "FastAPI") -> httpx.AsyncClient:
     """
     Get HTTP client from FastAPI app state.
     
+    This is the single source of truth for accessing the HTTP client from app state.
+    
     Args:
         app: FastAPI application instance.
     
@@ -267,84 +269,17 @@ def get_http_client_from_app(app: "FastAPI") -> httpx.AsyncClient:
         The shared httpx.AsyncClient.
     
     Raises:
-        RuntimeError: If HTTP client is not configured.
+        RuntimeError: If HTTP client is not configured or is closed.
     """
     if not hasattr(app.state, "http_client"):
         raise RuntimeError(
             "HTTP client not available. Ensure lifespan context is properly configured."
         )
-    return app.state.http_client
-
-
-# =============================================================================
-# Deprecated Functions (for backward compatibility during migration)
-# =============================================================================
-
-import warnings
-from typing import Callable
-
-_deprecation_warned: set[str] = set()
-
-
-def _warn_deprecation(func_name: str, alternative: str) -> None:
-    """Issue deprecation warning once per function."""
-    if func_name not in _deprecation_warned:
-        _deprecation_warned.add(func_name)
-        warnings.warn(
-            f"{func_name}() is deprecated. {alternative}",
-            DeprecationWarning,
-            stacklevel=3,
-        )
-
-
-def set_global_http_client(client: Optional[httpx.AsyncClient]) -> None:
-    """
-    DEPRECATED: Global HTTP client is an anti-pattern.
     
-    This function is kept for backward compatibility but will be removed.
-    Use explicit dependency injection instead:
-    - FastAPI routes: Use HttpClientDep
-    - Background tasks: Use create_standalone_http_client()
-    """
-    _warn_deprecation(
-        "set_global_http_client",
-        "Use create_standalone_http_client() for background tasks."
-    )
-    # No-op: we no longer maintain global state
-
-
-def get_global_http_client() -> httpx.AsyncClient:
-    """
-    DEPRECATED: Global HTTP client is an anti-pattern.
+    client: httpx.AsyncClient = app.state.http_client
     
-    This function is kept for backward compatibility but will be removed.
-    Use explicit dependency injection instead:
-    - FastAPI routes: Use HttpClientDep
-    - Background tasks: Use create_standalone_http_client()
+    if client is None or client.is_closed:
+        raise RuntimeError("HTTP client is not running or has been closed.")
     
-    Raises:
-        RuntimeError: Always raises as global client is no longer supported.
-    """
-    _warn_deprecation(
-        "get_global_http_client",
-        "Use dependency injection (HttpClientDep) or create_standalone_http_client()."
-    )
-    raise RuntimeError(
-        "Global HTTP client is no longer supported. "
-        "Use dependency injection (HttpClientDep) for FastAPI routes, "
-        "or create_standalone_http_client() for background tasks."
-    )
+    return client
 
-
-def is_http_client_available() -> bool:
-    """
-    DEPRECATED: Global HTTP client check is an anti-pattern.
-    
-    Returns:
-        Always False as global client is no longer supported.
-    """
-    _warn_deprecation(
-        "is_http_client_available",
-        "Check client availability through your injected dependency."
-    )
-    return False

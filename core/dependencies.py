@@ -21,8 +21,10 @@ import logging
 from collections.abc import AsyncGenerator
 from typing import Annotated, Optional, TYPE_CHECKING
 
+import httpx
 from fastapi import Depends, HTTPException, Query, Request, status
 
+from core.http_client import get_http_client_from_app
 from core.providers import (
     ConfigurationProvider,
     LogService,
@@ -40,7 +42,6 @@ from core.security.webhook import (
 )
 
 if TYPE_CHECKING:
-    import httpx
     from core.line_client import LineClient
     from core.ragic import RagicService
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -172,11 +173,11 @@ LineClientOptionalDep = Annotated["LineClient | None", Depends(get_line_optional
 # HTTP Client Dependencies
 # =============================================================================
 
-def get_http_client(request: Request) -> "httpx.AsyncClient":
+def get_http_client(request: Request) -> httpx.AsyncClient:
     """
     FastAPI dependency for shared HTTP client.
     
-    Gets the HTTP client from app.state, which is managed by lifespan events.
+    Gets the HTTP client from app.state via the centralized helper.
     
     Args:
         request: FastAPI request object.
@@ -185,24 +186,16 @@ def get_http_client(request: Request) -> "httpx.AsyncClient":
         httpx.AsyncClient: The shared HTTP client.
     
     Raises:
-        RuntimeError: If HTTP client is not available.
+        RuntimeError: If HTTP client is not available or closed.
     """
-    import httpx
-    if not hasattr(request.app.state, "http_client"):
-        raise RuntimeError(
-            "HTTP client not available. Ensure lifespan context is properly configured."
-        )
-    client = request.app.state.http_client
-    if client is None or client.is_closed:
-        raise RuntimeError("HTTP client is not running.")
-    return client
+    return get_http_client_from_app(request.app)
 
 
 # Type alias for dependency injection
-HttpClientDep = Annotated["httpx.AsyncClient", Depends(get_http_client)]
+HttpClientDep = Annotated[httpx.AsyncClient, Depends(get_http_client)]
 
 
-def get_http_client_optional(request: Request) -> "httpx.AsyncClient | None":
+def get_http_client_optional(request: Request) -> httpx.AsyncClient | None:
     """
     FastAPI dependency for optional HTTP client.
     
@@ -214,16 +207,18 @@ def get_http_client_optional(request: Request) -> "httpx.AsyncClient | None":
     Returns:
         httpx.AsyncClient or None if not available.
     """
-    import httpx
     if not hasattr(request.app.state, "http_client"):
         return None
-    client = request.app.state.http_client
+    
+    client: httpx.AsyncClient | None = request.app.state.http_client
+    
     if client is None or client.is_closed:
         return None
+    
     return client
 
 
-HttpClientOptionalDep = Annotated["httpx.AsyncClient | None", Depends(get_http_client_optional)]
+HttpClientOptionalDep = Annotated[httpx.AsyncClient | None, Depends(get_http_client_optional)]
 
 
 # =============================================================================

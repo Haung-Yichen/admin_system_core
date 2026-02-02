@@ -16,10 +16,6 @@ from core.http_client import (
     create_http_client_context,
     create_standalone_http_client,  # For background tasks
     get_http_client_from_app,
-    # Deprecated - kept for backward compatibility
-    get_global_http_client,
-    set_global_http_client,
-    is_http_client_available,
 )
 
 # Dependency Injection Providers
@@ -87,10 +83,6 @@ __all__ = [
     "create_http_client_context",
     "create_standalone_http_client",  # Preferred for background tasks
     "get_http_client_from_app",
-    # Deprecated exports (for backward compatibility only)
-    "get_global_http_client",  # DEPRECATED: Use HttpClientDep or create_standalone_http_client
-    "set_global_http_client",  # DEPRECATED: No-op, will be removed
-    "is_http_client_available",  # DEPRECATED: Check via dependency injection
     # New DI exports
     "IModuleContext", "get_app_context", "IConfigurable", "ILoggable", "ModuleContext",
     "ConfigurationProvider", "LogService", "ServerState", "ServiceProvider", "ProviderRegistry",
