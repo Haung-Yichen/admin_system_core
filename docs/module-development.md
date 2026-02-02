@@ -140,8 +140,15 @@ class ChatbotModule(IAppModule):
         # 取得全域服務
         self.config = context.config
         
-        # 啟動初始化邏輯...
+        # 建立 Router (同步操作)
+        # self.api_router = ...
+        
         context.log_event("Chatbot module loaded", "INFO")
+
+    async def async_startup(self):
+        # 啟動背景任務 (非同步操作)
+        # 例如：資料同步、建立 DB 連線池...
+        await self._start_background_tasks()
 ```
 
 ### 5. 身分驗證 (Authentication)
@@ -176,32 +183,58 @@ async def check_user_binding(id_token: str):
 
 模組若需讀寫 Ragic 表單，請使用統一的 `core.ragic` 套件。
 
-#### 定義 Ragic Model
+### 6. Ragic 整合 (Ragic Integration)
+
+所有與 Ragic 的互動皆透過 `core.ragic` 進行，並由 `ragic_registry.json` 統一管理設定。
+
+#### 用法 1: 使用 Repository (簡單查詢)
+
+適用於單次讀取或寫入操作。
+
 ```python
-from core.ragic import RagicModel, RagicField
+from core.ragic import RagicRepository, RagicModel, RagicField
+from core.ragic.registry import get_ragic_registry
 
 class LeaveRequest(RagicModel):
-    _sheet_path = "/HSIBAdmSys/forms/3"  # Ragic 表單路徑
+    # 使用 registry 取得表單路徑
+    _sheet_path = get_ragic_registry().get_sheet_path("leave_form")
     
-    # 定義欄位映射 (Ragic Field ID -> Python 屬性)
-    employee_id: str = RagicField("1000001", "工號")
-    leave_type: str = RagicField("1000002", "假別")
-    days: int = RagicField("1000003", "天數", cast_func=int)
-```
-
-#### 使用 Repository
-```python
-from core.ragic import RagicRepository
+    # 使用 registry 取得欄位 ID
+    employee_id: str = RagicField(
+        get_ragic_registry().get_field_id("leave_form", "EMPLOYEE_ID"), 
+        "工號"
+    )
+    # ... 其他欄位
 
 async def sync_leave_requests():
-    # 建立 Repository (由框架自動注入 RagicService)
     repo = RagicRepository(LeaveRequest)
-    
-    # 查詢所有資料
     requests = await repo.find_all()
-    
-    for req in requests:
-        print(f"Syncing leave for {req.employee_id}: {req.leave_type}")
+```
+
+#### 用法 2: 使用 Sync Services (資料同步)
+
+適用於需要大量快取至本地 DB 的資料 (如員工表、產品表)。
+
+```python
+from core.ragic import BaseRagicSyncService, get_sync_manager
+
+class MySyncService(BaseRagicSyncService[MyModel]):
+    def __init__(self):
+        super().__init__(model_class=MyModel, form_key="my_form")
+        
+    async def map_record_to_dict(self, record):
+        # 轉換 Ragic 資料為 DB Model 字典
+        return { ... }
+
+# 在 Module 初始化時註冊
+class MyModule(IAppModule):
+    def on_entry(self, context):
+        service = MySyncService()
+        get_sync_manager().register(
+            key="my_sync",
+            service=service,
+            module_name="my_module"
+        )
 ```
 
 ### 7. LINE Bot 整合 (Optional)

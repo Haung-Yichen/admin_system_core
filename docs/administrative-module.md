@@ -69,14 +69,10 @@ class AdministrativeModule(IAppModule):
     def get_module_name(self) -> str:
         return "administrative"
 
-    def on_entry(self, context: AppContext) -> None:
-        # 初始化 API routers
-        self._api_router = APIRouter(prefix="/administrative")
-        self._api_router.include_router(leave_router)
-        self._api_router.include_router(liff_router)
-        
-        # 背景同步 Ragic 資料
+    async def async_startup(self) -> None:
+        # 系統啟動後執行，避免阻塞主要流程
         self._start_ragic_sync()
+        self._start_rich_menu_setup()
 
     def get_api_router(self) -> Optional[APIRouter]:
         return self._api_router
@@ -87,6 +83,20 @@ class AdministrativeModule(IAppModule):
             "channel_secret": self._settings.line_channel_secret,
             "channel_access_token": self._settings.line_channel_access_token,
         }
+    
+    def on_entry(self, context: AppContext) -> None:
+        # 初始化 API routers
+        self._api_router = APIRouter(prefix="/administrative")
+        self._api_router.include_router(leave_router)
+        self._api_router.include_router(liff_router)
+        
+        # 註冊 Sync 服務
+        from modules.administrative.services import get_account_sync_service
+        get_sync_manager().register(
+             key="administrative_account",
+             service=get_account_sync_service(),
+             module_name=self.get_module_name()
+        )
 ```
 
 ### 配置管理
@@ -98,9 +108,7 @@ class AdministrativeModule(IAppModule):
 class AdminSettings(BaseSettings):
     # Ragic API
     ragic_api_key: SecretStr = Field(validation_alias="ADMIN_RAGIC_API_KEY")
-    ragic_url_account: str = Field(validation_alias="ADMIN_RAGIC_URL_ACCOUNT")
-    ragic_url_leave: str = Field(validation_alias="ADMIN_RAGIC_URL_LEAVE")
-    ragic_url_leave_type: str = Field(validation_alias="ADMIN_RAGIC_URL_LEAVE_TYPE")
+    # Ragic URL 均由 ragic_registry.json 統一管理，不再透過環境變數設定
     
     # LINE Channel (獨立帳號)
     line_channel_secret: SecretStr = Field(validation_alias="ADMIN_LINE_CHANNEL_SECRET")

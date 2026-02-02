@@ -206,9 +206,7 @@ SOP_BOT_LINE_CHANNEL_SECRET=your_channel_secret
 SOP_BOT_LINE_CHANNEL_ACCESS_TOKEN=your_access_token
 
 # Ragic 整合 (統一 Account 表格)
-SOP_BOT_RAGIC_EMPLOYEE_SHEET_PATH=/HSIBAdmSys/ychn-test/11
-SOP_BOT_RAGIC_FIELD_EMAIL=1005977
-SOP_BOT_RAGIC_FIELD_NAME=1005975
+# 注意：Ragic 表單 URL 與欄位 ID 現由 core/ragic_registry.json 統一管理
 
 # 向量嵌入
 SOP_BOT_EMBEDDING_DIMENSION=384

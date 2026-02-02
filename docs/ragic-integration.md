@@ -37,20 +37,23 @@ Admin System Core 支援兩種與 Ragic 互動的模式，請依據業務場景�
 
 ```python
 from core.ragic import RagicModel, RagicField
+from core.ragic.registry import get_ragic_registry
 from datetime import date
 
 class LeaveRequest(RagicModel):
-    # Ragic 表單路徑 (URL path without domain)
-    _sheet_path = "/HSIBAdmSys/forms/3"
+    # 使用 registry 取得表單路徑
+    _sheet_path = get_ragic_registry().get_sheet_path("leave_form")
     
-    # 欄位定義: RagicField("RAGIC_FIELD_ID", "描述")
-    employee_id: str = RagicField("1000001", "員工編號")
-    leave_type: str = RagicField("1000002", "假別")
-    days: int = RagicField("1000003", "天數", cast_func=int)
-    start_date: date = RagicField("1000004", "開始日期")
-    
-    # 可選欄位
-    reason: str | None = RagicField("1000005", "事由", default=None)
+    # 使用 registry 取得欄位 ID
+    employee_id: str = RagicField(
+        get_ragic_registry().get_field_id("leave_form", "EMPLOYEE_ID"), 
+        "員工編號"
+    )
+    leave_type: str = RagicField(
+        get_ragic_registry().get_field_id("leave_form", "LEAVE_TYPE"), 
+        "假別"
+    )
+    # ...
 ```
 
 ### 2. 使用 Repository (Using Repository)
@@ -144,12 +147,23 @@ from core.ragic.sync_base import BaseRagicSyncService
 
 class OvertimeSyncService(BaseRagicSyncService[OvertimeRecord]):
     async def sync_all_data(self) -> SyncResult:
-        # 1. Fetch raw data from Ragic
-        raw_data = await self._fetch_form_data()
-        
         # 2. Transform and upsert to DB
         # Implementation details...
         pass
+
+#### 4. 註冊服務 (Register Service)
+在模組的 `on_entry` 中向 `SyncManager` 註冊：
+
+```python
+from core.ragic import get_sync_manager
+
+# ... inside Module.on_entry ...
+get_sync_manager().register(
+    key="overtime_records",
+    service=OvertimeSyncService(),
+    module_name="administrative"
+)
+```
 ```
 
 ---

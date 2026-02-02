@@ -57,10 +57,16 @@ Admin System Core 採用 **Modular Monolith (模組化單體)** 架構。
 提供標準化、型別安全的方式與 Ragic 資料庫互動。
 
 *   **路徑**: `core/ragic/`
-*   **Service**: 標準化 HTTP Client，處理重試、錯誤處理。
-*   **Repository Pattern**: 封裝資料存取邏輯，提供高階 CRUD 操作。
-*   **Models**: 定義 Ragic 表單結構，支援欄位映射。
-*   **Registry**: 透過 `core/ragic/registry.py` 讀取 `ragic_registry.json`。
+*   **Centralized Configuration (RagicRegistry)**: 
+    *   **SSOT**: `ragic_registry.json` 為唯一真理來源。
+    *   **功能**: 集中管理所有表單路徑與欄位 ID，支援熱重載 (Hot Reload)。
+    *   **Registry**: `core/ragic/registry.py` 提供單例存取點。
+*   **Sync Manager**:
+    *   **功能**: 統一管理所有資料同步任務，支援依賴順序與啟動時自動同步。
+    *   **註冊**: 透過 `core/ragic.get_sync_manager()` 進行服務註冊。
+*   **Data Access Patterns**:
+    *   **Repository Pattern**: 用於即時 CRUD 操作 (`RagicRepository`)。
+    *   **Sync Pattern**: 用於將 Ragic 資料快取至本地資料庫 (`BaseRagicSyncService`)。
 
 ### 6. 基礎設施服務 (Infrastructure)
 *   **LineClient** (`services/line_client.py`): 底層 LINE API 用戶端，負責 HTTP 通訊與簽章驗證。
@@ -99,6 +105,12 @@ Admin System Core 採用 **Modular Monolith (模組化單體)** 架構。
 ### RagicService (Compatibility Layer) (`core/services/ragic.py`)
 舊版服務介面，現已重構為封裝 `core/ragic` 的功能。
 *   **重要變更**: 員工查詢功能已改為**查詢本地資料庫** (`administrative_accounts` 表)，而非直接呼叫 Ragic API，以提升效能與穩定性。
+
+### SyncManager (`core/ragic/sync_base.py`)
+負責協調與管理全系統的資料同步任務。
+*   `register()`: 註冊同步服務。
+*   `sync_all()`: 觸發所有已註冊服務的同步 (支援依賴排序)。
+*   `get_status()`: 取得目前所有同步任務的狀態。
 
 ---
 
@@ -147,8 +159,9 @@ Prefix: `/api`
 
 1.  **Discovery**: 系統啟動時掃描 `modules/` 目錄。
 2.  **Registration**: 註冊模組並建立實例。
-3.  **Initialization (`on_entry`)**: 注入 `AppContext`，模組可在此時啟動背景任務或建立連線。
-4.  **Routing**: 框架自動將模組的 `APIRouter` 掛載至主應用程式。
+3.  **Initialization (`on_entry`)**: 注入 `AppContext`，模組可在此時進行同步初始化 (如建立 Router)。
+4.  **Async Startup (`async_startup`)**: 在 Event Loop 啟動後執行，用於啟動背景任務 (如資料同步、Rich Menu 設定)。
+5.  **Routing**: 框架自動將模組的 `APIRouter` 掛載至主應用程式。
 
 ### 模組隔離原則
 
