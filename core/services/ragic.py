@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 class RagicFieldConfig:
     """Configuration for Ragic field mapping (unified Account table).
     
-    Now loads field IDs from the centralized ragic_columns.json file.
+    Loads field IDs from ragic_registry.json via the backward-compatible shim.
     """
     
     def __init__(self, config: dict[str, Any] | None = None) -> None:

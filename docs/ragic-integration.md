@@ -156,17 +156,17 @@ class OvertimeSyncService(BaseRagicSyncService[OvertimeRecord]):
 
 ## 最佳實踐
 
-### 1. 避免硬編碼 Field ID (Use ragic_columns.json)
+### 1. 避免硬編碼 Field ID (Use ragic_registry.json)
 
-Admin System Core 採用 **`ragic_columns.json`** 作為欄位 ID 的 Single Source of Truth。
-建議透過 `core.ragic.columns` 取得欄位設定，而非在程式碼中硬編碼。
+Admin System Core 採用 **`ragic_registry.json`** 作為欄位 ID 與表單設定的 Single Source of Truth。
+建議透過 `core.ragic.registry` 取得欄位設定，而非在程式碼中硬編碼。
 
 ```python
-from core.ragic.columns import get_account_form
+from core.ragic.registry import get_ragic_registry
 
 def get_employee_email_field():
-    form_config = get_account_form()
-    return form_config.field("EMAILS")  # 回傳 "1005977"
+    registry = get_ragic_registry()
+    return registry.get_field_id("account_form", "EMAILS")  # 回傳 "1005977"
 ```
 
 ### 2. 資料一致性與唯讀原則

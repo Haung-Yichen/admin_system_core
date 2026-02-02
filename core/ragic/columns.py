@@ -3,6 +3,10 @@ Ragic Columns Configuration Loader.
 
 DEPRECATED: This module is deprecated. Use core.ragic.registry instead.
 
+This module now serves as a backward-compatible shim that internally
+uses the new RagicRegistry. All functionality is delegated to the
+single source of truth: ragic_registry.json.
+
 The new RagicRegistry provides:
 - Centralized configuration from ragic_registry.json
 - Hot-reloading support
@@ -20,10 +24,8 @@ Example migration:
     form = registry.get_form_config("account_form")
 """
 
-import json
 import warnings
 from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
 
@@ -36,65 +38,58 @@ def _deprecation_warning(func_name: str) -> None:
     )
 
 
-# Path to the centralized config file (project root)
-_CONFIG_FILE = Path(__file__).parent.parent.parent / "ragic_columns.json"
-
-
-@lru_cache(maxsize=1)
-def _load_ragic_columns() -> dict[str, Any]:
-    """Load and cache the ragic_columns.json file."""
-    if not _CONFIG_FILE.exists():
-        # Fallback to new registry file
-        new_config = Path(__file__).parent.parent.parent / "ragic_registry.json"
-        if new_config.exists():
-            warnings.warn(
-                "ragic_columns.json not found. Please migrate to ragic_registry.json.",
-                DeprecationWarning,
-                stacklevel=2
-            )
-            # Return empty dict - callers should use new registry
-            return {}
-        raise FileNotFoundError(
-            f"Ragic columns config not found: {_CONFIG_FILE}. "
-            "Please ensure ragic_columns.json exists in the project root."
-        )
-    
-    with open(_CONFIG_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+def _get_registry():
+    """Get the RagicRegistry instance (lazy import to avoid circular imports)."""
+    from core.ragic.registry import get_ragic_registry
+    return get_ragic_registry()
 
 
 def get_form_config(form_name: str) -> dict[str, Any]:
     """
     Get configuration for a specific form.
     
+    DEPRECATED: Use get_ragic_registry().get_form_config() instead.
+    
     Args:
-        form_name: One of 'account_form', 'leave_form', 'leave_type_form'.
+        form_name: One of 'account_form', 'leave_form', 'leave_type_form', etc.
     
     Returns:
-        dict containing 'url', 'sheet_path', 'fields', etc.
+        dict containing 'url', 'sheet_path', 'fields', etc. (legacy format)
     
     Raises:
         KeyError: If form_name is not found.
     """
-    config = _load_ragic_columns()
-    if form_name not in config:
-        raise KeyError(f"Form '{form_name}' not found in ragic_columns.json")
-    return config[form_name]
+    _deprecation_warning("get_form_config")
+    registry = _get_registry()
+    form_config = registry.get_form_config(form_name)
+    
+    # Convert to legacy format for backward compatibility
+    return {
+        "url": f"{registry.base_url}{form_config.ragic_path}",
+        "sheet_path": form_config.ragic_path,
+        "description": form_config.description,
+        "key_field": form_config.key_field,
+        "fields": dict(form_config.field_mapping),
+    }
 
 
 def get_form_url(form_name: str) -> str:
     """Get the full URL for a form."""
-    return get_form_config(form_name)["url"]
+    _deprecation_warning("get_form_url")
+    return _get_registry().get_ragic_url(form_name)
 
 
 def get_sheet_path(form_name: str) -> str:
     """Get the sheet path (e.g., /HSIBAdmSys/ychn-test/11) for a form."""
-    return get_form_config(form_name)["sheet_path"]
+    _deprecation_warning("get_sheet_path")
+    return _get_registry().get_form_config(form_name).ragic_path
 
 
 def get_field_id(form_name: str, field_name: str) -> str:
     """
     Get a specific field ID from a form.
+    
+    DEPRECATED: Use get_ragic_registry().get_field_id() instead.
     
     Args:
         form_name: Form name (e.g., 'account_form').
@@ -106,20 +101,21 @@ def get_field_id(form_name: str, field_name: str) -> str:
     Raises:
         KeyError: If form or field not found.
     """
-    fields = get_form_config(form_name)["fields"]
-    if field_name not in fields:
-        raise KeyError(f"Field '{field_name}' not found in {form_name}")
-    return fields[field_name]
+    _deprecation_warning("get_field_id")
+    return _get_registry().get_field_id(form_name, field_name)
 
 
 def get_all_field_ids(form_name: str) -> dict[str, str]:
     """Get all field IDs for a form as a dict."""
-    return get_form_config(form_name)["fields"]
+    _deprecation_warning("get_all_field_ids")
+    return dict(_get_registry().get_form_config(form_name).field_mapping)
 
 
 class RagicFormConfig:
     """
     Helper class for accessing a specific form's configuration.
+    
+    DEPRECATED: Use get_ragic_registry().get_form_config() instead.
     
     Usage:
         account = RagicFormConfig("account_form")
@@ -128,39 +124,45 @@ class RagicFormConfig:
     """
     
     def __init__(self, form_name: str) -> None:
+        _deprecation_warning("RagicFormConfig")
         self._form_name = form_name
-        self._config = get_form_config(form_name)
+        registry = _get_registry()
+        self._form_config = registry.get_form_config(form_name)
+        self._base_url = registry.base_url
     
     @property
     def url(self) -> str:
-        return self._config["url"]
+        return f"{self._base_url}{self._form_config.ragic_path}"
     
     @property
     def sheet_path(self) -> str:
-        return self._config["sheet_path"]
+        return self._form_config.ragic_path
     
     @property
     def description(self) -> str:
-        return self._config.get("description", "")
+        return self._form_config.description or ""
     
     @property
     def key_field(self) -> str | None:
-        return self._config.get("key_field")
+        return self._form_config.key_field
     
     @property
     def fields(self) -> dict[str, str]:
-        return self._config["fields"]
+        return dict(self._form_config.field_mapping)
     
     def field(self, name: str) -> str:
         """Get a field ID by name."""
-        return self._config["fields"][name]
+        mapping = self._form_config.field_mapping
+        if name not in mapping:
+            raise KeyError(f"Field '{name}' not found in {self._form_name}")
+        return mapping[name]
     
     def __getattr__(self, name: str) -> str:
         """Allow attribute-style access to field IDs (e.g., config.EMPLOYEE_ID)."""
         if name.startswith("_"):
             raise AttributeError(name)
         try:
-            return self._config["fields"][name]
+            return self._form_config.field_mapping[name]
         except KeyError:
             raise AttributeError(f"Field '{name}' not found in {self._form_name}")
 

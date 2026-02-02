@@ -45,7 +45,7 @@ class RagicUserFieldMapping:
     """
     Ragic Field ID mappings for the User Identity form.
     
-    Loads field IDs from the centralized ragic_columns.json file.
+    Loads field IDs from ragic_registry.json via the backward-compatible shim.
     """
     
     _config = get_user_form()

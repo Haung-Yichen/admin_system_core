@@ -81,7 +81,7 @@ class TestAdminSettings:
         settings = AdminSettings()
 
         assert settings.ragic_api_key.get_secret_value() == "test_api_key"
-        # URLs now come from ragic_columns.json (property)
+        # URLs now come from ragic_registry.json (property)
         assert settings.ragic_url_account == get_account_form().url
 
     def test_secret_values(self, mock_env_vars):
@@ -122,7 +122,7 @@ class TestAdminSettings:
         assert settings.sync_timeout_seconds == 120
 
     def test_url_properties_from_json(self, mock_env_vars):
-        """Test that URL properties load from ragic_columns.json."""
+        """Test that URL properties load from ragic_registry.json."""
         get_admin_settings.cache_clear()
 
         settings = AdminSettings()

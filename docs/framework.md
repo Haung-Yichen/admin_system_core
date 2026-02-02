@@ -50,7 +50,7 @@ Admin System Core 採用 **Modular Monolith (模組化單體)** 架構。
     *   **Email**: 與 Ragic 員工表進行對應。
     *   **加密保護**: 關鍵個資 (Email, Line ID, Name) 皆自動加密。
 *   **UsedToken Model**: 追蹤已使用的 Magic Link Token，防止重複使用。
-*   **欄位定義 (SSOT)**: `ragic_columns.json` 作為 Ragic 欄位 ID 的唯一真理來源，避免硬編碼。
+*   **欄位定義 (SSOT)**: `ragic_registry.json` 作為 Ragic 欄位 ID 與表單設定的唯一真理來源，避免硬編碼。
 
 ### 5. Ragic 統一整合層 (Unified Ragic Integration)
 
@@ -60,7 +60,7 @@ Admin System Core 採用 **Modular Monolith (模組化單體)** 架構。
 *   **Service**: 標準化 HTTP Client，處理重試、錯誤處理。
 *   **Repository Pattern**: 封裝資料存取邏輯，提供高階 CRUD 操作。
 *   **Models**: 定義 Ragic 表單結構，支援欄位映射。
-*   **Columns Configuration**: 透過 `core/ragic/columns.py` 讀取 `ragic_columns.json`。
+*   **Registry**: 透過 `core/ragic/registry.py` 讀取 `ragic_registry.json`。
 
 ### 6. 基礎設施服務 (Infrastructure)
 *   **LineClient** (`services/line_client.py`): 底層 LINE API 用戶端，負責 HTTP 通訊與簽章驗證。

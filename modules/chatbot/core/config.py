@@ -22,7 +22,7 @@ class ChatbotSettings(BaseSettings):
     All variables use the SOP_BOT_ prefix for module isolation.
     Sensitive values use SecretStr for security.
     
-    Note: Ragic field IDs are now loaded from ragic_columns.json.
+    Note: Ragic field IDs are loaded from ragic_registry.json via RagicRegistry.
     """
 
     model_config = SettingsConfigDict(
@@ -71,7 +71,7 @@ class ChatbotSettings(BaseSettings):
         Field(default=15, description="Magic link expiration in minutes", validation_alias="SOP_BOT_MAGIC_LINK_EXPIRE_MINUTES")
     ] = 15
 
-    # === Ragic Config (loaded from ragic_columns.json) ===
+    # === Ragic Config (loaded from ragic_registry.json) ===
     @property
     def ragic_employee_sheet_path(self) -> str:
         """Ragic sheet path for unified Account table."""
