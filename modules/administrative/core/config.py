@@ -3,6 +3,8 @@ Administrative Module Configuration.
 
 Manages environment variables specific to the Administrative module.
 Uses prefix ADMIN_ to avoid conflicts with other modules.
+
+Refactored to use RagicRegistry for all Ragic configuration lookups.
 """
 
 from functools import lru_cache
@@ -11,202 +13,236 @@ from typing import Annotated
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from core.ragic.columns import get_leave_form, get_leave_type_form, get_account_form
+# Import registry for Ragic configuration
+from core.ragic.registry import get_ragic_registry
 
 
-class RagicLeaveFieldMapping:
+def _get_registry():
+    """Lazy-load registry to avoid circular imports."""
+    return get_ragic_registry()
+
+
+class RagicFieldMappingMeta(type):
+    """
+    Metaclass for Ragic field mappings that allows attribute access
+    to return field IDs directly from the registry.
+    
+    Usage:
+        class MyFields(metaclass=RagicFieldMappingMeta):
+            _form_key = "my_form"
+            FIELD_NAME = "FIELD_NAME"  # Just declare the field name
+        
+        # Access returns the field ID from registry:
+        field_id = MyFields.FIELD_NAME  # Returns "1234567"
+    """
+    
+    def __getattr__(cls, name: str) -> str:
+        """
+        Intercept attribute access to look up field IDs from registry.
+        
+        Args:
+            name: The attribute name (should match a field name in registry)
+            
+        Returns:
+            The field ID from the registry for this form/field combination.
+        """
+        # Skip private/dunder attributes
+        if name.startswith("_"):
+            raise AttributeError(f"'{cls.__name__}' has no attribute '{name}'")
+        
+        # Get the form key from the class
+        form_key = getattr(cls, "_form_key", None)
+        if not form_key:
+            raise AttributeError(f"'{cls.__name__}' missing '_form_key' attribute")
+        
+        # Look up field ID from registry
+        return _get_registry().get_field_id(form_key, name)
+
+
+class RagicLeaveFieldMapping(metaclass=RagicFieldMappingMeta):
     """
     Ragic Field ID mappings for the Leave Request form.
     
-    Loads field IDs from the centralized ragic_columns.json file.
+    Access any attribute to get the field ID from the registry.
+    Example: RagicLeaveFieldMapping.EMPLOYEE_NAME returns "1005571"
     """
+    _form_key = "leave_form"
     
-    _config = get_leave_form()
-    
-    # === Employee Info ===
-    EMPLOYEE_NAME = _config.field("EMPLOYEE_NAME")
-    EMPLOYEE_EMAIL = _config.field("EMPLOYEE_EMAIL")
-    SALES_DEPT = _config.field("SALES_DEPT")
-    
-    # === Leave Details ===
-    LEAVE_TYPE = _config.field("LEAVE_TYPE")
-    START_DATE = _config.field("START_DATE")
-    END_DATE = _config.field("END_DATE")
-    LEAVE_DATE = _config.field("LEAVE_DATE")
-    LEAVE_DAYS = _config.field("LEAVE_DAYS")
-    LEAVE_REASON = _config.field("LEAVE_REASON")
-    
-    # === Approval Chain (Names - Visible) ===
-    SALES_DEPT_MANAGER_NAME = _config.field("SALES_DEPT_MANAGER_NAME")
-    DIRECT_SUPERVISOR_NAME = _config.field("DIRECT_SUPERVISOR_NAME")
-    
-    # === Approval Chain (Emails - Hidden, for triggering workflow) ===
-    SALES_DEPT_MANAGER_EMAIL = _config.field("SALES_DEPT_MANAGER_EMAIL")
-    DIRECT_SUPERVISOR_EMAIL = _config.field("DIRECT_SUPERVISOR_EMAIL")
-    
-    # === System Fields ===
-    APPROVAL_STATUS = _config.field("APPROVAL_STATUS")
-    LEAVE_REQUEST_NO = _config.field("LEAVE_REQUEST_NO")
-    CREATED_DATE = _config.field("CREATED_DATE")
+    # Declared fields (for IDE autocompletion and documentation)
+    # Values are just documentation - actual IDs come from registry
+    EMPLOYEE_NAME: str
+    EMPLOYEE_EMAIL: str
+    SALES_DEPT: str
+    LEAVE_TYPE: str
+    START_DATE: str
+    END_DATE: str
+    LEAVE_DATE: str
+    LEAVE_DAYS: str
+    LEAVE_REASON: str
+    SALES_DEPT_MANAGER_NAME: str
+    DIRECT_SUPERVISOR_NAME: str
+    SALES_DEPT_MANAGER_EMAIL: str
+    DIRECT_SUPERVISOR_EMAIL: str
+    APPROVAL_STATUS: str
+    LEAVE_REQUEST_NO: str
+    CREATED_DATE: str
 
 
-class RagicLeaveTypeFieldMapping:
+class RagicLeaveTypeFieldMapping(metaclass=RagicFieldMappingMeta):
     """
     Ragic Field ID mappings for the Leave Type master data form.
     
-    Loads field IDs from the centralized ragic_columns.json file.
+    Access any attribute to get the field ID from the registry.
+    Example: RagicLeaveTypeFieldMapping.LEAVE_TYPE_CODE returns "3005177"
     """
+    _form_key = "leave_type_form"
     
-    _config = get_leave_type_form()
-    
-    # === Primary Key ===
-    RAGIC_ID = _config.field("RAGIC_ID")
-    
-    # === Leave Type Info ===
-    LEAVE_TYPE_CODE = _config.field("LEAVE_TYPE_CODE")
-    LEAVE_TYPE_NAME = _config.field("LEAVE_TYPE_NAME")
-    DEDUCTION_MULTIPLIER = _config.field("DEDUCTION_MULTIPLIER")
+    # Declared fields
+    RAGIC_ID: str
+    LEAVE_TYPE_CODE: str
+    LEAVE_TYPE_NAME: str
+    DEDUCTION_MULTIPLIER: str
 
 
-class RagicAccountFieldMapping:
+class RagicAccountFieldMapping(metaclass=RagicFieldMappingMeta):
     """
     Ragic Field ID mappings for the unified Account form.
     
-    Loads field IDs from the centralized ragic_columns.json file.
+    Access any attribute to get the field ID from the registry.
+    Example: RagicAccountFieldMapping.NAME returns "1000032"
     """
-    
-    _config = get_account_form()
+    _form_key = "account_form"
     
     # === Primary Identification ===
-    RAGIC_ID = _config.field("RAGIC_ID")
-    ACCOUNT_ID = _config.field("ACCOUNT_ID")
-    ID_CARD_NUMBER = _config.field("ID_CARD_NUMBER")
-    EMPLOYEE_ID = _config.field("EMPLOYEE_ID")
+    RAGIC_ID: str
+    ACCOUNT_ID: str
+    ID_CARD_NUMBER: str
+    EMPLOYEE_ID: str
     
     # === Status & Basic Info ===
-    STATUS = _config.field("STATUS")
-    NAME = _config.field("NAME")
-    GENDER = _config.field("GENDER")
-    BIRTHDAY = _config.field("BIRTHDAY")
-    EDUCATION = _config.field("EDUCATION")
+    STATUS: str
+    NAME: str
+    GENDER: str
+    BIRTHDAY: str
+    EDUCATION: str
     
     # === Contact Info ===
-    EMAILS = _config.field("EMAILS")
-    PHONES = _config.field("PHONES")
-    MOBILES = _config.field("MOBILES")
+    EMAILS: str
+    PHONES: str
+    MOBILES: str
     
     # === Organization Info ===
-    ORG_CODE = _config.field("ORG_CODE")
-    ORG_NAME = _config.field("ORG_NAME")
-    ORG_PATH = _config.field("ORG_PATH")
-    RANK_CODE = _config.field("RANK_CODE")
-    RANK_NAME = _config.field("RANK_NAME")
-    SALES_DEPT = _config.field("SALES_DEPT")
-    SALES_DEPT_MANAGER = _config.field("SALES_DEPT_MANAGER")
+    ORG_CODE: str
+    ORG_NAME: str
+    ORG_PATH: str
+    RANK_CODE: str
+    RANK_NAME: str
+    SALES_DEPT: str
+    SALES_DEPT_MANAGER: str
     
     # === Referrer & Mentor ===
-    REFERRER_ID_CARD = _config.field("REFERRER_ID_CARD")
-    REFERRER_NAME = _config.field("REFERRER_NAME")
-    MENTOR_ID_CARD = _config.field("MENTOR_ID_CARD")
-    MENTOR_NAME = _config.field("MENTOR_NAME")
-    SUCCESSOR_NAME = _config.field("SUCCESSOR_NAME")
-    SUCCESSOR_ID_CARD = _config.field("SUCCESSOR_ID_CARD")
+    REFERRER_ID_CARD: str
+    REFERRER_NAME: str
+    MENTOR_ID_CARD: str
+    MENTOR_NAME: str
+    SUCCESSOR_NAME: str
+    SUCCESSOR_ID_CARD: str
     
     # === Employment Dates ===
-    APPROVAL_DATE = _config.field("APPROVAL_DATE")
-    EFFECTIVE_DATE = _config.field("EFFECTIVE_DATE")
-    RESIGNATION_DATE = _config.field("RESIGNATION_DATE")
-    DEATH_DATE = _config.field("DEATH_DATE")
-    CREATED_DATE = _config.field("CREATED_DATE")
+    APPROVAL_DATE: str
+    EFFECTIVE_DATE: str
+    RESIGNATION_DATE: str
+    DEATH_DATE: str
+    CREATED_DATE: str
     
     # === Rate & Financial ===
-    ASSESSMENT_RATE = _config.field("ASSESSMENT_RATE")
-    COURT_WITHHOLDING_RATE = _config.field("COURT_WITHHOLDING_RATE")
-    COURT_MIN_LIVING_EXPENSE = _config.field("COURT_MIN_LIVING_EXPENSE")
-    PRIOR_COMMISSION_DEBT = _config.field("PRIOR_COMMISSION_DEBT")
-    PRIOR_DEBT = _config.field("PRIOR_DEBT")
+    ASSESSMENT_RATE: str
+    COURT_WITHHOLDING_RATE: str
+    COURT_MIN_LIVING_EXPENSE: str
+    PRIOR_COMMISSION_DEBT: str
+    PRIOR_DEBT: str
     
     # === Bank Info ===
-    BANK_NAME = _config.field("BANK_NAME")
-    BANK_BRANCH_CODE = _config.field("BANK_BRANCH_CODE")
-    BANK_ACCOUNT = _config.field("BANK_ACCOUNT")
-    EDI_FORMAT = _config.field("EDI_FORMAT")
+    BANK_NAME: str
+    BANK_BRANCH_CODE: str
+    BANK_ACCOUNT: str
+    EDI_FORMAT: str
     
     # === Address - Household Registration ===
-    HOUSEHOLD_POSTAL_CODE = _config.field("HOUSEHOLD_POSTAL_CODE")
-    HOUSEHOLD_CITY = _config.field("HOUSEHOLD_CITY")
-    HOUSEHOLD_DISTRICT = _config.field("HOUSEHOLD_DISTRICT")
-    HOUSEHOLD_ADDRESS = _config.field("HOUSEHOLD_ADDRESS")
+    HOUSEHOLD_POSTAL_CODE: str
+    HOUSEHOLD_CITY: str
+    HOUSEHOLD_DISTRICT: str
+    HOUSEHOLD_ADDRESS: str
     
     # === Address - Mailing ===
-    MAILING_POSTAL_CODE = _config.field("MAILING_POSTAL_CODE")
-    MAILING_CITY = _config.field("MAILING_CITY")
-    MAILING_DISTRICT = _config.field("MAILING_DISTRICT")
-    MAILING_ADDRESS = _config.field("MAILING_ADDRESS")
+    MAILING_POSTAL_CODE: str
+    MAILING_CITY: str
+    MAILING_DISTRICT: str
+    MAILING_ADDRESS: str
     
     # === Emergency Contact ===
-    EMERGENCY_CONTACT = _config.field("EMERGENCY_CONTACT")
-    EMERGENCY_PHONE = _config.field("EMERGENCY_PHONE")
+    EMERGENCY_CONTACT: str
+    EMERGENCY_PHONE: str
     
     # === Life Insurance License ===
-    LIFE_LICENSE_NUMBER = _config.field("LIFE_LICENSE_NUMBER")
-    LIFE_FIRST_REGISTRATION_DATE = _config.field("LIFE_FIRST_REGISTRATION_DATE")
-    LIFE_REGISTRATION_DATE = _config.field("LIFE_REGISTRATION_DATE")
-    LIFE_EXAM_NUMBER = _config.field("LIFE_EXAM_NUMBER")
-    LIFE_CANCELLATION_DATE = _config.field("LIFE_CANCELLATION_DATE")
-    LIFE_LICENSE_EXPIRY = _config.field("LIFE_LICENSE_EXPIRY")
+    LIFE_LICENSE_NUMBER: str
+    LIFE_FIRST_REGISTRATION_DATE: str
+    LIFE_REGISTRATION_DATE: str
+    LIFE_EXAM_NUMBER: str
+    LIFE_CANCELLATION_DATE: str
+    LIFE_LICENSE_EXPIRY: str
     
     # === Property Insurance License ===
-    PROPERTY_LICENSE_NUMBER = _config.field("PROPERTY_LICENSE_NUMBER")
-    PROPERTY_REGISTRATION_DATE = _config.field("PROPERTY_REGISTRATION_DATE")
-    PROPERTY_EXAM_NUMBER = _config.field("PROPERTY_EXAM_NUMBER")
-    PROPERTY_CANCELLATION_DATE = _config.field("PROPERTY_CANCELLATION_DATE")
-    PROPERTY_LICENSE_EXPIRY = _config.field("PROPERTY_LICENSE_EXPIRY")
-    PROPERTY_STANDARD_DATE = _config.field("PROPERTY_STANDARD_DATE")
+    PROPERTY_LICENSE_NUMBER: str
+    PROPERTY_REGISTRATION_DATE: str
+    PROPERTY_EXAM_NUMBER: str
+    PROPERTY_CANCELLATION_DATE: str
+    PROPERTY_LICENSE_EXPIRY: str
+    PROPERTY_STANDARD_DATE: str
     
     # === Accident & Health Insurance License ===
-    AH_LICENSE_NUMBER = _config.field("AH_LICENSE_NUMBER")
-    AH_REGISTRATION_DATE = _config.field("AH_REGISTRATION_DATE")
-    AH_CANCELLATION_DATE = _config.field("AH_CANCELLATION_DATE")
-    AH_LICENSE_EXPIRY = _config.field("AH_LICENSE_EXPIRY")
+    AH_LICENSE_NUMBER: str
+    AH_REGISTRATION_DATE: str
+    AH_CANCELLATION_DATE: str
+    AH_LICENSE_EXPIRY: str
     
     # === Investment-linked Insurance ===
-    INVESTMENT_REGISTRATION_DATE = _config.field("INVESTMENT_REGISTRATION_DATE")
-    INVESTMENT_EXAM_NUMBER = _config.field("INVESTMENT_EXAM_NUMBER")
+    INVESTMENT_REGISTRATION_DATE: str
+    INVESTMENT_EXAM_NUMBER: str
     
     # === Foreign Currency Insurance ===
-    FOREIGN_CURRENCY_REGISTRATION_DATE = _config.field("FOREIGN_CURRENCY_REGISTRATION_DATE")
-    FOREIGN_CURRENCY_EXAM_NUMBER = _config.field("FOREIGN_CURRENCY_EXAM_NUMBER")
+    FOREIGN_CURRENCY_REGISTRATION_DATE: str
+    FOREIGN_CURRENCY_EXAM_NUMBER: str
     
     # === Qualifications ===
-    FUND_QUALIFICATION_DATE = _config.field("FUND_QUALIFICATION_DATE")
-    TRADITIONAL_ANNUITY_QUALIFICATION = _config.field("TRADITIONAL_ANNUITY_QUALIFICATION")
-    VARIABLE_ANNUITY_QUALIFICATION = _config.field("VARIABLE_ANNUITY_QUALIFICATION")
-    STRUCTURED_BOND_QUALIFICATION = _config.field("STRUCTURED_BOND_QUALIFICATION")
-    MOBILE_INSURANCE_EXAM_DATE = _config.field("MOBILE_INSURANCE_EXAM_DATE")
-    PREFERRED_INSURANCE_EXAM_DATE = _config.field("PREFERRED_INSURANCE_EXAM_DATE")
-    APP_ENABLED = _config.field("APP_ENABLED")
+    FUND_QUALIFICATION_DATE: str
+    TRADITIONAL_ANNUITY_QUALIFICATION: str
+    VARIABLE_ANNUITY_QUALIFICATION: str
+    STRUCTURED_BOND_QUALIFICATION: str
+    MOBILE_INSURANCE_EXAM_DATE: str
+    PREFERRED_INSURANCE_EXAM_DATE: str
+    APP_ENABLED: str
     
     # === Training Completion Dates ===
-    SENIOR_TRAINING_DATE = _config.field("SENIOR_TRAINING_DATE")
-    FOREIGN_CURRENCY_TRAINING_DATE = _config.field("FOREIGN_CURRENCY_TRAINING_DATE")
-    FAIR_TREATMENT_TRAINING_DATE = _config.field("FAIR_TREATMENT_TRAINING_DATE")
-    PROFIT_SHARING_TRAINING_DATE = _config.field("PROFIT_SHARING_TRAINING_DATE")
+    SENIOR_TRAINING_DATE: str
+    FOREIGN_CURRENCY_TRAINING_DATE: str
+    FAIR_TREATMENT_TRAINING_DATE: str
+    PROFIT_SHARING_TRAINING_DATE: str
     
     # === Office Info ===
-    OFFICE = _config.field("OFFICE")
-    OFFICE_TAX_ID = _config.field("OFFICE_TAX_ID")
-    SUBMISSION_UNIT = _config.field("SUBMISSION_UNIT")
+    OFFICE: str
+    OFFICE_TAX_ID: str
+    SUBMISSION_UNIT: str
     
     # === Health Insurance Withholding ===
-    NHI_WITHHOLDING_STATUS = _config.field("NHI_WITHHOLDING_STATUS")
-    NHI_WITHHOLDING_UPDATE_DATE = _config.field("NHI_WITHHOLDING_UPDATE_DATE")
+    NHI_WITHHOLDING_STATUS: str
+    NHI_WITHHOLDING_UPDATE_DATE: str
     
     # === Miscellaneous ===
-    REMARKS = _config.field("REMARKS")
-    NOTES = _config.field("NOTES")
-    ACCOUNT_ATTRIBUTES = _config.field("ACCOUNT_ATTRIBUTES")
-    LAST_MODIFIED = _config.field("LAST_MODIFIED")
+    REMARKS: str
+    NOTES: str
+    ACCOUNT_ATTRIBUTES: str
+    LAST_MODIFIED: str
 
 
 class AdminSettings(BaseSettings):
@@ -216,7 +252,7 @@ class AdminSettings(BaseSettings):
     All variables use the ADMIN_ prefix for module isolation.
     Sensitive values use SecretStr for security.
     
-    Note: Ragic URLs are now loaded from ragic_columns.json (centralized config).
+    Note: Ragic URLs are now loaded from RagicRegistry (ragic_registry.json).
     """
 
     model_config = SettingsConfigDict(
@@ -226,7 +262,7 @@ class AdminSettings(BaseSettings):
         extra="ignore",
     )
 
-    # Ragic API Configuration (only API key from env, URLs from JSON)
+    # Ragic API Configuration (only API key from env, URLs from Registry)
     ragic_api_key: Annotated[
         SecretStr,
         Field(
@@ -281,21 +317,21 @@ class AdminSettings(BaseSettings):
         ),
     ] = ""
 
-    # === Ragic URLs (loaded from ragic_columns.json) ===
+    # === Ragic URLs (loaded from RagicRegistry) ===
     @property
     def ragic_url_account(self) -> str:
         """Full URL for the Ragic Account Form API endpoint."""
-        return get_account_form().url
+        return _get_registry().get_ragic_url("account_form")
 
     @property
     def ragic_url_leave(self) -> str:
         """Full URL for the Ragic Leave Request Form API endpoint."""
-        return get_leave_form().url
+        return _get_registry().get_ragic_url("leave_form")
 
     @property
     def ragic_url_leave_type(self) -> str:
         """Full URL for the Ragic Leave Type master data API endpoint."""
-        return get_leave_type_form().url
+        return _get_registry().get_ragic_url("leave_type_form")
 
 
 @lru_cache
@@ -309,3 +345,39 @@ def get_admin_settings() -> AdminSettings:
         AdminSettings: Administrative settings instance.
     """
     return AdminSettings()
+
+
+# === Backward Compatibility Aliases ===
+# These functions are deprecated - use RagicRegistry directly
+
+def get_account_form():
+    """Deprecated: Use get_ragic_registry().get_form_config('account_form')"""
+    import warnings
+    warnings.warn(
+        "get_account_form() is deprecated. Use get_ragic_registry().get_form_config('account_form')",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    return _get_registry().get_form_config("account_form")
+
+
+def get_leave_form():
+    """Deprecated: Use get_ragic_registry().get_form_config('leave_form')"""
+    import warnings
+    warnings.warn(
+        "get_leave_form() is deprecated. Use get_ragic_registry().get_form_config('leave_form')",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    return _get_registry().get_form_config("leave_form")
+
+
+def get_leave_type_form():
+    """Deprecated: Use get_ragic_registry().get_form_config('leave_type_form')"""
+    import warnings
+    warnings.warn(
+        "get_leave_type_form() is deprecated. Use get_ragic_registry().get_form_config('leave_type_form')",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    return _get_registry().get_form_config("leave_type_form")

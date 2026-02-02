@@ -88,12 +88,15 @@ class BaseRagicSyncService(ABC, Generic[ModelT]):
     - Single record sync (for webhooks)
     - Full table sync
     
+    Subclasses can either:
+    1. Pass form_key to constructor (uses RagicRegistry - recommended)
+    2. Override get_ragic_config() (legacy approach)
+    
     Subclasses must implement:
-    - get_ragic_config(): Return form URL and sheet_path
     - map_record_to_dict(): Transform Ragic record to model dict
-    - get_unique_field(): Return the field name used for upsert conflict
     
     Optionally override:
+    - get_unique_field(): Return the field name used for upsert conflict
     - _post_sync_hook(): Called after each record is synced
     """
     
@@ -101,21 +104,21 @@ class BaseRagicSyncService(ABC, Generic[ModelT]):
         self,
         model_class: Type[ModelT],
         ragic_service: Optional[RagicService] = None,
+        form_key: Optional[str] = None,
     ) -> None:
         self._model_class = model_class
         self._ragic_service = ragic_service or get_ragic_service()
+        self._form_key = form_key
+        self._registry = None
         
-    @abstractmethod
-    def get_ragic_config(self) -> Dict[str, Any]:
-        """
-        Return Ragic form configuration.
+        # If form_key is provided, load config from registry
+        if form_key:
+            from core.ragic.registry import get_ragic_registry
+            self._registry = get_ragic_registry()
+            self._form_config = self._registry.get_form_config(form_key)
+        else:
+            self._form_config = None
         
-        Must return dict with:
-        - url: Full URL to the Ragic form
-        - sheet_path: Path component (e.g., /HSIBAdmSys/ychn-test/12)
-        """
-        pass
-    
     @abstractmethod
     async def map_record_to_dict(self, record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -128,6 +131,43 @@ class BaseRagicSyncService(ABC, Generic[ModelT]):
             Dictionary with model field names, or None to skip this record.
         """
         pass
+    
+    def get_ragic_config(self) -> Dict[str, Any]:
+        """
+        Return Ragic form configuration.
+        
+        If form_key was provided to constructor, returns config from registry.
+        Otherwise, subclasses must override this method.
+        
+        Returns:
+            dict with 'url' and 'sheet_path' keys.
+        """
+        if self._form_config:
+            return {
+                "url": f"{self._registry.base_url}{self._form_config.ragic_path}",
+                "sheet_path": self._form_config.ragic_path,
+            }
+        
+        raise NotImplementedError(
+            "Subclasses must either pass form_key to constructor "
+            "or override get_ragic_config()"
+        )
+    
+    def get_field_id(self, field_name: str) -> Optional[str]:
+        """
+        Get the Ragic field ID for a logical field name.
+        
+        Only available when form_key is provided to constructor.
+        
+        Args:
+            field_name: The logical field name (e.g., "EMPLOYEE_ID").
+        
+        Returns:
+            The Ragic field ID or None if not configured.
+        """
+        if self._form_config:
+            return self._form_config.get_field_id(field_name)
+        return None
     
     def get_unique_field(self) -> str:
         """

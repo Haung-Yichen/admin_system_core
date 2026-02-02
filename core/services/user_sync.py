@@ -240,6 +240,138 @@ class UserSyncService(BaseRagicSyncService[User]):
         """Use ragic_id for upsert conflict detection."""
         return "ragic_id"
     
+    async def sync_all_data(self) -> SyncResult:
+        """
+        Override base sync to add HARD DELETE for removed records.
+        
+        Sync Strategy:
+        1. Fetch all records from Ragic
+        2. Upsert each Ragic record to local DB
+        3. Find local records NOT in Ragic (by UUID comparison)
+        4. HARD DELETE those orphaned local records
+        
+        This ensures Ragic is the single source of truth (Master).
+        """
+        import time
+        from sqlalchemy import select, delete
+        from uuid import UUID as UUIDType
+        
+        start_time = time.time()
+        result = SyncResult()
+        
+        config = self.get_ragic_config()
+        form_url = config.get("url")
+        
+        if not form_url:
+            logger.error("Ragic URL not configured")
+            result.errors = 1
+            result.error_messages.append("Ragic URL not configured")
+            return result
+        
+        logger.info(f"Starting full sync (with delete) from {form_url}")
+        
+        try:
+            # Fetch all records from Ragic
+            records = await self._ragic_service.get_records_by_url(
+                form_url,
+                params={"naming": "EID"}
+            )
+            
+            if records is None:
+                records = []
+            
+            logger.info(f"Fetched {len(records)} records from Ragic")
+            
+            # Pre-collect all UUIDs from Ragic records BEFORE upsert
+            # This is the authoritative list of what should exist locally
+            ragic_uuids: set[UUIDType] = set()
+            for record in records:
+                local_db_id = record.get(Fields.LOCAL_DB_ID, "").strip()
+                if local_db_id:
+                    try:
+                        ragic_uuids.add(UUIDType(local_db_id))
+                    except ValueError:
+                        pass
+            
+            logger.debug(f"Ragic UUIDs collected: {len(ragic_uuids)} - {ragic_uuids}")
+            
+            async with get_thread_local_session() as session:
+                # Step 1: Upsert all Ragic records
+                for record in records:
+                    try:
+                        async with session.begin_nested():
+                            sync_success = await self._upsert_record(session, record, result)
+                            if sync_success:
+                                result.synced += 1
+                            else:
+                                result.skipped += 1
+                    except Exception as e:
+                        result.errors += 1
+                        error_msg = f"Error syncing record {record.get('_ragicId')}: {type(e).__name__}: {e}"
+                        result.error_messages.append(error_msg)
+                        logger.error(error_msg)
+                
+                # Commit upserts
+                await session.commit()
+                
+                # Step 2: Find and delete orphaned local records
+                if ragic_uuids:
+                    # Get all local user UUIDs
+                    local_query = select(User.id)
+                    local_result = await session.execute(local_query)
+                    # Ensure UUIDs are proper UUID objects for comparison
+                    local_uuids: set[UUIDType] = set()
+                    for row in local_result.fetchall():
+                        uid = row[0]
+                        if isinstance(uid, UUIDType):
+                            local_uuids.add(uid)
+                        elif isinstance(uid, str):
+                            local_uuids.add(UUIDType(uid))
+                        else:
+                            local_uuids.add(UUIDType(str(uid)))
+                    
+                    logger.debug(f"Local UUIDs ({len(local_uuids)}): {local_uuids}")
+                    logger.debug(f"Ragic UUIDs ({len(ragic_uuids)}): {ragic_uuids}")
+                    
+                    # Find orphans (in local but not in Ragic)
+                    orphan_uuids = local_uuids - ragic_uuids
+                    
+                    logger.debug(f"Orphan UUIDs (local - ragic): {orphan_uuids}")
+                    
+                    if orphan_uuids:
+                        logger.info(f"Found {len(orphan_uuids)} orphaned records to delete")
+                        
+                        # Delete orphans
+                        for orphan_id in orphan_uuids:
+                            try:
+                                delete_query = delete(User).where(User.id == orphan_id)
+                                await session.execute(delete_query)
+                                result.deleted += 1
+                                logger.info(f"Deleted orphaned user: {orphan_id}")
+                            except Exception as e:
+                                logger.error(f"Failed to delete user {orphan_id}: {e}")
+                                result.errors += 1
+                        
+                        await session.commit()
+                else:
+                    # No valid UUIDs from Ragic - this might be a data issue
+                    # Don't delete anything to be safe
+                    logger.warning("No valid UUIDs found in Ragic records, skipping delete phase")
+                    
+        except Exception as e:
+            result.errors += 1
+            result.error_messages.append(f"Sync failed: {e}")
+            logger.exception(f"Full sync failed: {e}")
+        
+        result.duration_ms = (time.time() - start_time) * 1000
+        logger.info(
+            f"Sync completed: {result.synced} synced, "
+            f"{result.skipped} skipped, {result.deleted} deleted, "
+            f"{result.errors} errors ({result.duration_ms:.0f}ms)"
+        )
+        
+        return result
+    
     async def _upsert_record(
         self,
         session: AsyncSession,
@@ -318,7 +450,15 @@ class UserSyncService(BaseRagicSyncService[User]):
             instance = existing_instance
             logger.debug(f"Updated existing user (ragic_id={ragic_id})")
         else:
-            # Create new record
+            # Create new record - use Ragic's local_db_id if available
+            if local_db_id:
+                try:
+                    from uuid import UUID as UUIDType
+                    uuid_value = local_db_id if isinstance(local_db_id, UUIDType) else UUIDType(str(local_db_id))
+                    data["id"] = uuid_value
+                    logger.debug(f"Creating user with Ragic-specified UUID: {uuid_value}")
+                except ValueError:
+                    logger.warning(f"Invalid UUID from Ragic: {local_db_id}, generating new UUID")
             instance = User(**data)
             session.add(instance)
             logger.debug(f"Created new user (ragic_id={ragic_id})")

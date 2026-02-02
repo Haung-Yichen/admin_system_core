@@ -309,6 +309,23 @@ def parse_string(value: Any) -> Optional[str]:
     return str(value).strip() or None
 
 
+def _get_ragic_id(record: dict[str, Any], field_key: str) -> int | None:
+    """
+    Get Ragic ID from record, handling the case where ragic_id might be 0.
+    
+    Args:
+        record: Raw record from Ragic API.
+        field_key: The field key to look up (e.g., Fields.RAGIC_ID).
+        
+    Returns:
+        The Ragic ID as int, or None if not found.
+    """
+    ragic_id = parse_int(record.get(field_key))
+    if ragic_id is None:
+        ragic_id = record.get("_ragicId")
+    return ragic_id
+
+
 def transform_ragic_record(record: dict[str, Any]) -> dict[str, Any]:
     """
     Transform a raw Ragic record into a format suitable for Pydantic validation.
@@ -321,7 +338,7 @@ def transform_ragic_record(record: dict[str, Any]) -> dict[str, Any]:
     """
     return {
         # === Primary Identification ===
-        "ragic_id": parse_int(record.get(Fields.RAGIC_ID)) or record.get("_ragicId"),
+        "ragic_id": _get_ragic_id(record, Fields.RAGIC_ID),
         "account_id": parse_string(record.get(Fields.ACCOUNT_ID)) or "",
         "id_card_number": parse_string(record.get(Fields.ID_CARD_NUMBER)),
         "employee_id": parse_string(record.get(Fields.EMPLOYEE_ID)),
@@ -738,11 +755,13 @@ class RagicSyncService:
             dict with model field names and typed values, or None if invalid.
         """
         try:
-            ragic_id = parse_int(record.get(LeaveTypeFields.RAGIC_ID)) or record.get("_ragicId")
+            ragic_id = parse_int(record.get(LeaveTypeFields.RAGIC_ID))
+            if ragic_id is None:
+                ragic_id = record.get("_ragicId")
             leave_type_code = parse_string(record.get(LeaveTypeFields.LEAVE_TYPE_CODE))
             leave_type_name = parse_string(record.get(LeaveTypeFields.LEAVE_TYPE_NAME))
             
-            if not ragic_id or not leave_type_code or not leave_type_name:
+            if ragic_id is None or not leave_type_code or not leave_type_name:
                 logger.warning(f"Skipping leave type record with missing required fields: {record}")
                 return None
             

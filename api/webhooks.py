@@ -28,6 +28,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from core.dependencies import WebhookAuthDep
 from core.ragic.sync_base import get_sync_manager
+from core.ragic.registry import get_ragic_registry
 from core.security.webhook import WebhookAuthContext
 from pydantic import BaseModel
 
@@ -101,6 +102,16 @@ async def ragic_webhook(
     )
     
     try:
+        # Validate source against RagicRegistry webhook keys
+        registry = get_ragic_registry()
+        form_config = registry.get_form_by_webhook_key(source)
+        
+        if form_config:
+            logger.debug(
+                f"Webhook source '{source}' mapped to form '{form_config.form_key}' "
+                f"(strategy: {form_config.sync_strategy})"
+            )
+        
         # Parse form data
         form_data = await request.form()
         data = dict(form_data)

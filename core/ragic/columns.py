@@ -1,14 +1,39 @@
 """
 Ragic Columns Configuration Loader.
 
-Loads column definitions from the centralized ragic_columns.json file.
-This is the single source of truth for all Ragic field IDs and form URLs.
+DEPRECATED: This module is deprecated. Use core.ragic.registry instead.
+
+The new RagicRegistry provides:
+- Centralized configuration from ragic_registry.json
+- Hot-reloading support
+- Sync strategy definitions
+- Better error handling
+
+Example migration:
+    # Old way (deprecated)
+    from core.ragic.columns import get_account_form
+    form = get_account_form()
+    
+    # New way
+    from core.ragic.registry import get_ragic_registry
+    registry = get_ragic_registry()
+    form = registry.get_form_config("account_form")
 """
 
 import json
+import warnings
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+
+def _deprecation_warning(func_name: str) -> None:
+    """Emit deprecation warning for legacy functions."""
+    warnings.warn(
+        f"{func_name}() is deprecated. Use core.ragic.registry.get_ragic_registry() instead.",
+        DeprecationWarning,
+        stacklevel=3
+    )
 
 
 # Path to the centralized config file (project root)
@@ -19,6 +44,16 @@ _CONFIG_FILE = Path(__file__).parent.parent.parent / "ragic_columns.json"
 def _load_ragic_columns() -> dict[str, Any]:
     """Load and cache the ragic_columns.json file."""
     if not _CONFIG_FILE.exists():
+        # Fallback to new registry file
+        new_config = Path(__file__).parent.parent.parent / "ragic_registry.json"
+        if new_config.exists():
+            warnings.warn(
+                "ragic_columns.json not found. Please migrate to ragic_registry.json.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+            # Return empty dict - callers should use new registry
+            return {}
         raise FileNotFoundError(
             f"Ragic columns config not found: {_CONFIG_FILE}. "
             "Please ensure ragic_columns.json exists in the project root."
@@ -131,31 +166,58 @@ class RagicFormConfig:
 
 
 # Pre-configured form accessors (singleton-like)
+# DEPRECATED: These functions are deprecated. Use RagicRegistry instead.
+
 @lru_cache(maxsize=5)
 def get_account_form() -> RagicFormConfig:
-    """Get Account form configuration."""
+    """
+    Get Account form configuration.
+    
+    DEPRECATED: Use get_ragic_registry().get_form_config("account_form")
+    """
+    _deprecation_warning("get_account_form")
     return RagicFormConfig("account_form")
 
 
 @lru_cache(maxsize=5)
 def get_leave_form() -> RagicFormConfig:
-    """Get Leave form configuration."""
+    """
+    Get Leave form configuration.
+    
+    DEPRECATED: Use get_ragic_registry().get_form_config("leave_form")
+    """
+    _deprecation_warning("get_leave_form")
     return RagicFormConfig("leave_form")
 
 
 @lru_cache(maxsize=5)
 def get_leave_type_form() -> RagicFormConfig:
-    """Get Leave Type form configuration."""
+    """
+    Get Leave Type form configuration.
+    
+    DEPRECATED: Use get_ragic_registry().get_form_config("leave_type_form")
+    """
+    _deprecation_warning("get_leave_type_form")
     return RagicFormConfig("leave_type_form")
 
 
 @lru_cache(maxsize=5)
 def get_user_form() -> RagicFormConfig:
-    """Get User Identity form configuration."""
+    """
+    Get User Identity form configuration.
+    
+    DEPRECATED: Use get_ragic_registry().get_form_config("user_form")
+    """
+    _deprecation_warning("get_user_form")
     return RagicFormConfig("user_form")
 
 
 @lru_cache(maxsize=5)
 def get_sop_form() -> RagicFormConfig:
-    """Get SOP Knowledge Base form configuration."""
+    """
+    Get SOP Knowledge Base form configuration.
+    
+    DEPRECATED: Use get_ragic_registry().get_form_config("sop_form")
+    """
+    _deprecation_warning("get_sop_form")
     return RagicFormConfig("sop_form")

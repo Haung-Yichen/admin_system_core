@@ -576,7 +576,20 @@ class AuthService:
                     User.line_user_id_hash == line_id_hash)
             )
         )
-        return result.scalar_one_or_none()
+        users = result.scalars().all()
+
+        if not users:
+            return None
+
+        if len(users) > 1:
+            logger.error(
+                f"Binding conflict: Email {email} and LINE {line_sub[:8]}... link to different users"
+            )
+            raise UserBindingError(
+                "Account conflict: Email and LINE account are bound to different users."
+            )
+
+        return users[0]
 
     async def _create_bound_user(
         self, db: AsyncSession, email: str, line_sub: str
