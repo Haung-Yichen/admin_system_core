@@ -165,7 +165,8 @@
             <div class="status-icon success">✓</div>
             <h1 class="title">驗證成功！</h1>
             <p class="message">您的驗證已完成，即將返回聊天室</p>
-            <p class="close-hint">視窗即將自動關閉...</p>
+            <p class="close-hint" id="success-hint">視窗即將自動關閉...</p>
+            <button class="retry-btn hidden" id="manual-close-btn" onclick="closeWindow()">關閉視窗</button>
         </div>
 
         <!-- Error State -->
@@ -182,23 +183,56 @@
         /**
          * Email Verification Redirect Handler
          * 
-         * Flow:
-         * 1. Initialize LIFF
-         * 2. Extract token from URL query parameters
-         * 3. Call backend verification API
-         * 4. Show success and close window, or show error
+         * Architecture: UI State Locking + Fire-and-Forget LIFF
+         * 
+         * Key Principles:
+         * 1. UI State Locking: Loading state is LOCKED until API responds
+         * 2. API First: ONLY verifyToken() can change UI state
+         * 3. Background LIFF: liff.init() runs fire-and-forget, never blocks UI
+         * 4. Execution Guard: Prevents duplicate main() execution
          */
 
+        // ============================================
+        // IMMEDIATE EXECUTION - UI State Locking
+        // ============================================
+        // Lock title BEFORE any async operations
+        document.title = '驗證中...';
+        
+        // Execution guard - prevent duplicate runs
+        if (window.hasRun) {
+            console.warn('main() already executed, skipping duplicate run');
+        }
+
+        // ============================================
         // Configuration
+        // ============================================
         const API_BASE_URL = '/auth/api/verify';
         const CLOSE_DELAY_MS = 2000;
 
-        // DOM Elements
-        const loadingState = document.getElementById('loading-state');
-        const successState = document.getElementById('success-state');
-        const errorState = document.getElementById('error-state');
-        const errorMessage = document.getElementById('error-message');
-        const errorDetail = document.getElementById('error-detail');
+        // ============================================
+        // Global State
+        // ============================================
+        let isLiffReady = false;
+        let liffInitPromise = null; // Store LIFF init promise for later checking
+
+        // ============================================
+        // DOM Elements (lazy init to ensure DOM ready)
+        // ============================================
+        let loadingState, successState, errorState, errorMessage, errorDetail, successHint, manualCloseBtn;
+
+        function initDomElements() {
+            loadingState = document.getElementById('loading-state');
+            successState = document.getElementById('success-state');
+            errorState = document.getElementById('error-state');
+            errorMessage = document.getElementById('error-message');
+            errorDetail = document.getElementById('error-detail');
+            successHint = document.getElementById('success-hint');
+            manualCloseBtn = document.getElementById('manual-close-btn');
+        }
+
+        // ============================================
+        // UI State Management
+        // ============================================
 
         /**
          * Show a specific state and hide others
@@ -208,10 +242,19 @@
             loadingState.classList.toggle('hidden', state !== 'loading');
             successState.classList.toggle('hidden', state !== 'success');
             errorState.classList.toggle('hidden', state !== 'error');
+            
+            // Update document title based on state
+            if (state === 'success') {
+                document.title = '驗證成功 - HSIB Admin System';
+            } else if (state === 'error') {
+                document.title = '驗證失敗 - HSIB Admin System';
+            }
+            // Note: 'loading' title is already set at script start
         }
 
         /**
          * Display error message with optional details
+         * IMPORTANT: This should ONLY be called for API errors
          * @param {string} message - User-friendly error message
          * @param {string} [detail] - Technical detail (optional)
          */
@@ -227,19 +270,85 @@
         }
 
         /**
-         * Close the LIFF window or fallback to regular close
+         * Show success state, then check LIFF for close behavior
+         * Close behavior is determined AFTER showing success
          */
-        function closeWindow() {
-            if (typeof liff !== 'undefined' && liff.isInClient && liff.isInClient()) {
-                liff.closeWindow();
+        function showSuccess() {
+            // Step 1: Immediately show success UI
+            showState('success');
+            
+            // Step 2: Check LIFF status for close behavior (delayed check)
+            checkLiffAndSetupClose();
+        }
+
+        /**
+         * Check LIFF availability and setup appropriate close behavior
+         * This runs AFTER success is displayed
+         */
+        async function checkLiffAndSetupClose() {
+            // Wait a brief moment for LIFF to potentially complete
+            // But don't block - use a reasonable timeout
+            const liffCheckTimeout = 1500; // 1.5 seconds max wait
+            
+            try {
+                // Race between LIFF init and timeout
+                if (liffInitPromise) {
+                    await Promise.race([
+                        liffInitPromise,
+                        new Promise(resolve => setTimeout(() => resolve(false), liffCheckTimeout))
+                    ]);
+                }
+            } catch (e) {
+                // Ignore LIFF errors
+                console.warn('LIFF check error (ignored):', e.message);
+            }
+
+            // Now check if LIFF is actually ready and in client
+            const canAutoClose = isLiffReady && 
+                                 typeof liff !== 'undefined' && 
+                                 typeof liff.isInClient === 'function' && 
+                                 liff.isInClient();
+
+            if (canAutoClose) {
+                // LIFF is ready - auto close after delay
+                successHint.textContent = '視窗即將自動關閉...';
+                successHint.classList.remove('hidden');
+                manualCloseBtn.classList.add('hidden');
+                
+                setTimeout(() => {
+                    closeWindow();
+                }, CLOSE_DELAY_MS);
             } else {
-                // Fallback for external browser
-                window.close();
+                // LIFF not available - show manual close button (graceful degradation)
+                successHint.textContent = '驗證已完成';
+                manualCloseBtn.textContent = '關閉視窗';
+                manualCloseBtn.classList.remove('hidden');
             }
         }
 
         /**
+         * Close the LIFF window or fallback to regular close
+         */
+        function closeWindow() {
+            try {
+                if (isLiffReady && typeof liff !== 'undefined' && liff.isInClient && liff.isInClient()) {
+                    liff.closeWindow();
+                } else {
+                    window.close();
+                }
+            } catch (e) {
+                console.warn('Close window error:', e);
+                window.close();
+            }
+        }
+
+        // ============================================
+        // Token Extraction
+        // ============================================
+
+        /**
          * Extract token from URL query parameters
+         * MUST be called BEFORE any LIFF operations (LIFF may modify URL)
          * @returns {string | null} Token if found
          */
         function getTokenFromUrl() {
@@ -247,10 +356,16 @@
             return urlParams.get('token');
         }
 
+        // ============================================
+        // API Communication (Business Logic)
+        // ============================================
+
         /**
          * Call the backend verification API
+         * This is the ONLY function that can determine success/failure
          * @param {string} token - Verification token
-         * @returns {Promise<{success: boolean, message?: string, error?: string}>}
+         * @returns {Promise<object>} API response data
+         * @throws {Error} On HTTP error or network failure
          */
         async function verifyToken(token) {
             const response = await fetch(API_BASE_URL, {
@@ -265,11 +380,18 @@
             const data = await response.json();
 
             if (!response.ok) {
-                throw new Error(data.detail || data.message || `HTTP ${response.status}`);
+                // Create error with HTTP status for proper categorization
+                const error = new Error(data.detail || data.message || `HTTP ${response.status}`);
+                error.httpStatus = response.status;
+                throw error;
             }
 
             return data;
         }
+
+        // ============================================
+        // LIFF Initialization (Background / Fire-and-Forget)
+        // ============================================
 
         /**
          * Get LIFF ID from backend config
@@ -279,77 +401,143 @@
             try {
                 const response = await fetch('/api/administrative/liff/config');
                 const data = await response.json();
-                // Try to get a verification-specific LIFF ID, fallback to leave form ID
                 return data.liff_id_verify || data.liff_id_leave || '';
             } catch (error) {
-                console.error('Failed to fetch LIFF config:', error);
+                console.warn('Failed to fetch LIFF config:', error);
                 return '';
             }
         }
 
         /**
-         * Main initialization and verification flow
+         * Initialize LIFF SDK in background (Fire-and-Forget)
+         * This function NEVER throws - all errors are caught and logged
+         * It sets the global isLiffReady flag when successful
          */
-        async function main() {
+        async function initializeLiffBackground() {
             try {
-                // Step 1: Extract token from URL BEFORE LIFF init
-                // IMPORTANT: LIFF init may clear URL query parameters
-                const token = getTokenFromUrl();
-                console.log('Token extracted before LIFF init:', token ? 'found' : 'not found');
-
-                // Step 2: Get LIFF ID and initialize
                 const liffId = await getLiffId();
                 
                 if (!liffId) {
-                    showError('系統配置錯誤', 'LIFF ID 未設定');
+                    console.info('LIFF ID not configured, auto-close will be unavailable');
+                    isLiffReady = false;
                     return;
                 }
 
                 await liff.init({ liffId });
-                console.log('LIFF initialized successfully');
-
-                // Step 3: Validate token exists
-                if (!token) {
-                    showError('驗證連結無效', '缺少驗證碼參數');
-                    return;
-                }
-
-                // Step 4: Call verification API
-                const result = await verifyToken(token);
-
-                // Step 5: Handle success
-                showState('success');
-
-                // Step 6: Close window after delay
-                setTimeout(() => {
-                    closeWindow();
-                }, CLOSE_DELAY_MS);
-
+                isLiffReady = true;
+                console.info('LIFF initialized successfully (background)');
             } catch (error) {
-                console.error('Verification error:', error);
+                // LIFF error is a SOFT ERROR - never affects UI
+                isLiffReady = false;
+                console.info('LIFF init failed (soft error, ignored):', error.message);
+            }
+        }
+
+        // ============================================
+        // Error Parsing
+        // ============================================
+
+        /**
+         * Parse API verification error into user-friendly message
+         * @param {Error} error - The error object from API call
+         * @returns {{userMessage: string, technicalDetail: string}}
+         */
+        function parseVerificationError(error) {
+            let userMessage = '驗證過程發生錯誤，請重試';
+            let technicalDetail = error.message;
+
+            const msg = (error.message || '').toLowerCase();
+
+            if (msg.includes('expired')) {
+                userMessage = '驗證連結已過期';
+                technicalDetail = '請重新申請驗證';
+            } else if (msg.includes('invalid') || msg.includes('not found') || msg.includes('已使用')) {
+                userMessage = '驗證連結無效';
+                technicalDetail = '連結可能已被使用或不存在';
+            } else if (msg.includes('fetch') || msg.includes('network') || msg.includes('failed to fetch')) {
+                userMessage = '網路連線錯誤';
+                technicalDetail = '請檢查網路連線後重試';
+            } else if (error.httpStatus >= 500) {
+                userMessage = '伺服器暫時無法處理請求';
+                technicalDetail = '請稍後再試';
+            }
+
+            return { userMessage, technicalDetail };
+        }
+
+        // ============================================
+        // Main Entry Point
+        // ============================================
+
+        /**
+         * Main initialization and verification flow
+         * 
+         * CRITICAL FLOW:
+         * 1. Guard against duplicate execution
+         * 2. Extract token SYNCHRONOUSLY (before LIFF can modify URL)
+         * 3. Start LIFF init in BACKGROUND (fire-and-forget, no await)
+         * 4. Execute API verification (this BLOCKS and determines UI)
+         * 5. Show result based ONLY on API response
+         * 6. Check LIFF status AFTER showing success for close behavior
+         */
+        async function main() {
+            // ========== Execution Guard ==========
+            if (window.hasRun) {
+                console.warn('Duplicate main() call blocked');
+                return;
+            }
+            window.hasRun = true;
+
+            // ========== Initialize DOM Elements ==========
+            initDomElements();
+
+            // ========== Ensure Loading State is Visible ==========
+            // Defensive: Force loading state in case HTML didn't render correctly
+            showState('loading');
+
+            // ========== Step 1: Extract Token SYNCHRONOUSLY ==========
+            // CRITICAL: Must happen BEFORE LIFF init (LIFF may modify URL)
+            const token = getTokenFromUrl();
+            console.info('Token extracted:', token ? 'present' : 'missing');
+
+            // ========== Step 2: Validate Token Exists ==========
+            // This is the ONLY non-API error we show (missing parameter)
+            if (!token) {
+                showError('驗證連結無效', '缺少驗證碼參數');
+                return;
+            }
+
+            // ========== Step 3: Start LIFF in Background (Fire-and-Forget) ==========
+            // NO AWAIT - LIFF runs completely independently
+            // Store promise for later checking in success flow
+            liffInitPromise = initializeLiffBackground();
+            // Do NOT await here - let it run in background
+
+            // ========== Step 4: Execute API Verification ==========
+            // This is the ONLY thing that determines success/failure UI
+            try {
+                await verifyToken(token);
                 
-                // Determine user-friendly error message
-                let userMessage = '驗證過程發生錯誤，請重試';
-                let technicalDetail = error.message;
-
-                if (error.message.includes('expired')) {
-                    userMessage = '驗證連結已過期';
-                    technicalDetail = '請重新申請驗證';
-                } else if (error.message.includes('invalid') || error.message.includes('not found')) {
-                    userMessage = '驗證連結無效';
-                    technicalDetail = '連結可能已被使用或不存在';
-                } else if (error.message.includes('LIFF')) {
-                    userMessage = 'LINE 應用程式初始化失敗';
-                    technicalDetail = '請確認是否從 LINE 應用程式開啟';
-                }
-
+                // ========== Step 5: API SUCCESS - Show Success ==========
+                // LIFF status is checked AFTER showing success
+                showSuccess();
+                
+            } catch (error) {
+                // ========== Step 5: API FAILURE - Show Error ==========
+                // ONLY API errors reach here
+                console.error('Verification API error:', error);
+                const { userMessage, technicalDetail } = parseVerificationError(error);
                 showError(userMessage, technicalDetail);
             }
         }
 
+        // ============================================
+        // Bootstrap
+        // ============================================
+        
         // Start the verification flow when DOM is ready
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', main);
+            document.addEventListener('DOMContentLoaded', main, { once: true });
         } else {
             main();
         }
