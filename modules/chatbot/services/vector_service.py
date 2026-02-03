@@ -157,6 +157,46 @@ class VectorService:
 
         # Preprocess query to handle repeated text
         processed_query = self._preprocess_query(query)
+        
+        # KEYWORD OVERRIDES
+        # Specific keywords map directly to specific SOP IDs, bypassing vector search
+        KEYWORD_OVERRIDES = {
+            "制度": "SOP-020",
+            "制度查詢": "SOP-020"
+        }
+        
+        target_sop_id = None
+        # Check if any keyword is in the query (fuzzy match)
+        # Sort by length descending to match longest keyword first (e.g. prioritize "制度查詢" over "制度")
+        for keyword, sop_id in sorted(KEYWORD_OVERRIDES.items(), key=lambda x: len(x[0]), reverse=True):
+            if keyword in processed_query:
+                target_sop_id = sop_id
+                logger.info(f"Keyword override triggered: '{keyword}' found in '{processed_query}' -> {target_sop_id}")
+                break
+        
+        if target_sop_id:
+            result = await db.execute(
+                select(SOPDocument).where(SOPDocument.sop_id == target_sop_id)
+            )
+            doc = result.scalar_one_or_none()
+            
+            if doc:
+                 snippet = self._generate_snippet(doc.content, max_length=200)
+                 search_result = SearchResult(
+                    document=SOPDocumentResponse.model_validate(doc),
+                    similarity_score=1.0, # Perfect match
+                    snippet=snippet
+                 )
+                 return SearchResponse(
+                    query=query,
+                    results=[search_result],
+                    total_count=1,
+                    search_time_ms=round((time.time() - start_time) * 1000, 2)
+                 )
+            else:
+                logger.warning(f"Override target {target_sop_id} not found in DB")
+                # Fallback to normal search if target SOP not found
+
 
         top_k = top_k or int(self._vector_config.get("top_k", 3))
         similarity_threshold = similarity_threshold or float(

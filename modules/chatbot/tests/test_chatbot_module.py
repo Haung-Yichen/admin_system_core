@@ -189,20 +189,12 @@ class TestRagicServiceFuzzyMatch:
         """Test exact string match."""
         from core.services.ragic import RagicService
 
-        # We can test the static method directly or mock ConfigLoader
-        # Here we just assume default config is fine for unit test if we mock nothing
-        # But wait, RagicService __init__ loads config.
-
-        with patch('core.services.ragic.ConfigLoader') as MockConfigLoader:
-            mock_loader = MockConfigLoader.return_value
-            mock_loader.get.return_value = {}  # Default config
-
-            service = RagicService()
-
-            # Test fuzzy match
-            assert service._fuzzy_match("Email", "email", 0.8) is True
-            assert service._fuzzy_match("E-mail", "email", 0.8) is True
-            assert service._fuzzy_match("完全不同", "email", 0.8) is False
+        # _fuzzy_match is a static method, so we can check it directly
+        # or verify it via instance if needed (though instance init involves other things)
+        
+        assert RagicService._fuzzy_match("Email", "email", 0.8) is True
+        assert RagicService._fuzzy_match("E-mail", "email", 0.8) is True
+        assert RagicService._fuzzy_match("完全不同", "email", 0.8) is False
 
 
 if __name__ == "__main__":

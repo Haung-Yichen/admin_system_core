@@ -9,6 +9,37 @@ Note: The webhook endpoint has been moved to the framework layer (core/server.py
 """
 
 from typing import Any
+import re
+
+
+def _extract_urls(text: str) -> list[str]:
+    """Extract URLs from text."""
+    urls = []
+    
+    # Pattern 1: Match full URLs with http/https protocol
+    pattern_full = r'https?://[^\s\u4e00-\u9fa5,，。!！?？;；()（）\]\[<>「」『』【】]+'
+    urls.extend(re.findall(pattern_full, text))
+    
+    # Pattern 2: Match domain-only URLs (without http://)
+    # Matches patterns like: example.com, sub.example.com.tw, ap13.ragic.com/path
+    # Common TLDs: com, tw, org, net, gov, edu, io, co, etc.
+    pattern_domain = r'(?:^|[\s\u4e00-\u9fa5：:])([a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z0-9][-a-zA-Z0-9.]*\.(?:com|tw|org|net|gov|edu|io|co)(?:\.[a-zA-Z]{2,3})?(?:/[^\s\u4e00-\u9fa5,，。!！?？;；\]\[<>「」『』【】]*)?)'
+    domain_matches = re.findall(pattern_domain, text)
+    
+    # Clean up and add https:// prefix to domain-only URLs
+    cleaned_urls = []
+    for url in urls:
+        url = url.rstrip('.,;:)')
+        if url:
+            cleaned_urls.append(url)
+    
+    for domain in domain_matches:
+        domain = domain.rstrip('.,;:)')
+        if domain and not domain.startswith('http'):
+            # Add https:// prefix for LINE to recognize as clickable link
+            cleaned_urls.append(f'https://{domain}')
+    
+    return list(set(cleaned_urls))  # Remove duplicates
 
 
 def create_auth_required_flex(line_user_id: str) -> dict[str, Any]:
@@ -96,7 +127,7 @@ def create_sop_result_flex(
             "wrap": True, "size": "sm", "margin": "lg"}
     ])
 
-    return {
+    bubble = {
         "type": "bubble",
         "size": "mega",
         "header": {"type": "box", "layout": "vertical", "contents": [
@@ -105,6 +136,29 @@ def create_sop_result_flex(
         ], "backgroundColor": "#00B900", "paddingAll": "15px"},
         "body": {"type": "box", "layout": "vertical", "contents": contents, "paddingAll": "20px"},
     }
+
+    # Extract URLs and add buttons
+    urls = _extract_urls(content)
+    if urls:
+        footer_contents = []
+        for i, url in enumerate(urls[:3]):  # Limit to 3 links
+            label = "🔗 開啟連結"
+            if len(urls) > 1:
+                label += f" {i+1}"
+            
+            footer_contents.append(
+                {"type": "button", "action": {"type": "uri", "label": label, "uri": url}, 
+                 "style": "secondary", "margin": "sm"}
+            )
+        
+        bubble["footer"] = {
+            "type": "box", 
+            "layout": "vertical", 
+            "contents": footer_contents,
+            "paddingAll": "15px"
+        }
+
+    return bubble
 
 
 def create_no_result_flex(query: str) -> dict[str, Any]:
