@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timezone
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 from api.admin_auth import CurrentAdmin
@@ -266,6 +266,7 @@ async def get_loaded_modules(
 
 @router.get("/dashboard", response_model=DashboardResponse)
 async def get_dashboard_data(
+    request: Request,
     admin: CurrentAdmin,
 ) -> DashboardResponse:
     """
@@ -320,24 +321,79 @@ async def get_dashboard_data(
             details={"Error": str(e)[:50]},
         ))
     
-    # Check LINE
+    # Check LINE Bots from Modules
+    if registry is not None:
+        for module in registry.get_all_modules():
+            line_config = module.get_line_bot_config()
+            if line_config:
+                module_name = module.get_module_name().capitalize()
+                service_name = f"LINE Bot ({module_name})"
+                
+                try:
+                    from core.line_client import LineClient
+                    # Create dedicated client for this module
+                    mod_line_client = LineClient(
+                        channel_secret=line_config.get("channel_secret"),
+                        access_token=line_config.get("channel_access_token")
+                    )
+                    
+                    line_health = await mod_line_client.check_connection()
+                    services.append(ServiceHealth(
+                        name=service_name,
+                        status=line_health.get("status", "error"),
+                        message=line_health.get("message", ""),
+                        details=line_health.get("details", {}),
+                    ))
+                    await mod_line_client.close()
+                    
+                except Exception as e:
+                    services.append(ServiceHealth(
+                        name=service_name,
+                        status="error",
+                        message="Service unavailable",
+                        details={"Error": str(e)[:50]},
+                    ))
+
+    # Check Core/Admin LINE Bot (if configured globally and distinct)
+    # This covers cases where there might be a system-wide bot not tied to a specific module
+    # or if the Administrative module uses the global config but we want to fail-safe check it.
     try:
         from core.line_client import LineClient
+        # Use global config provider
         line_client = LineClient(config=context.config)
-        line_health = await line_client.check_connection()
-        services.append(ServiceHealth(
-            name="LINE Bot",
-            status=line_health.get("status", "error"),
-            message=line_health.get("message", ""),
-            details=line_health.get("details", {}),
-        ))
+        
+        # Only check if globally configured
+        if line_client.is_configured():
+            # Check if this global bot is already covered by a module to avoid duplicates
+            # (Simple heuristic: compare channel secret if possible, or just append distinct name)
+            # Since we can't easily peek secrets, we'll name it "System LINE Bot"
+            # It might duplicate "LINE Bot (Administrative)" if they share configs, 
+            # but that's acceptable for visibility.
+            
+            line_health = await line_client.check_connection()
+            
+            # Check for duplicates by Bot ID if available
+            bot_id = line_health.get("details", {}).get("Bot ID")
+            is_duplicate = False
+            for s in services:
+                if s.details.get("Bot ID") == bot_id:
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                services.append(ServiceHealth(
+                    name="System LINE Bot",
+                    status=line_health.get("status", "error"),
+                    message=line_health.get("message", ""),
+                    details=line_health.get("details", {}),
+                ))
+            
+            await line_client.close()
+            
     except Exception as e:
-        services.append(ServiceHealth(
-            name="LINE Bot",
-            status="error",
-            message="Service unavailable",
-            details={"Error": str(e)[:50]},
-        ))
+         # Only report error if we expected a system bot but it failed
+         # If not configured, we ignore
+         pass
     
     # Module statuses
     modules_info: list[ModuleInfo] = []
