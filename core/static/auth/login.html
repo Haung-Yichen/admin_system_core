@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>身份驗證 - {{APP_NAME}}</title>
+
+    <!-- LIFF SDK (Official CDN) - Must load before app script -->
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'line-green': '#06C755',
+                        'line-green-dark': '#05B34C',
+                        'primary': '#1A1A2E',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            font-family: 'Noto Sans TC', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        /* Custom spinner animation */
+        .spinner {
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Input focus ring with LINE green */
+        input:focus {
+            outline: none;
+            border-color: #06C755;
+            box-shadow: 0 0 0 3px rgba(6, 199, 85, 0.2);
+        }
+
+        /* Smooth state transitions */
+        .state-container {
+            transition: opacity 0.3s ease-in-out;
+        }
+
+        /* Hide state by default */
+        .state-hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+
+<body class="min-h-screen bg-gradient-to-br from-line-green to-green-600 flex items-center justify-center p-4">
+
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+
+        <!-- Header -->
+        <div class="bg-gradient-to-r from-line-green to-green-500 text-white p-8 text-center">
+            <div class="mb-4">
+                <img src="/static/crown.png?v=2" alt="Logo" class="w-20 h-auto mx-auto" onerror="this.style.display='none'">
+            </div>
+            <h1 class="text-2xl font-semibold">身份驗證</h1>
+            <p class="text-green-100 mt-2">Identity Verification</p>
+        </div>
+
+        <!-- Content -->
+        <div class="p-8">
+
+            <!-- Loading State: LIFF Initialization -->
+            <div id="state-loading" class="state-container text-center py-8">
+                <div class="w-12 h-12 border-4 border-gray-200 border-t-line-green rounded-full spinner mx-auto mb-4"></div>
+                <p class="text-gray-600">正在初始化...</p>
+            </div>
+
+            <!-- Error State: LIFF or Network Error -->
+            <div id="state-error" class="state-container state-hidden">
+                <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6" role="alert">
+                    <p class="font-medium">⚠️ 發生錯誤</p>
+                    <p id="error-message" class="text-sm mt-1">無法初始化 LINE 登入</p>
+                </div>
+                <button onclick="window.location.reload()" 
+                        class="w-full py-3 px-4 bg-gray-600 hover:bg-gray-700 text-white font-medium rounded-lg transition-colors">
+                    重新整理
+                </button>
+            </div>
+
+            <!-- Form State: Email Input -->
+            <div id="state-form" class="state-container state-hidden">
+
+                <!-- Success Alert (shown after email sent) -->
+                <div id="alert-success" class="state-hidden bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-6">
+                    <p class="font-medium">✅ 驗證連結已發送</p>
+                    <p id="success-email" class="text-sm mt-1">請檢查您的電子郵件信箱</p>
+                </div>
+
+                <!-- Error Alert (shown on form error) -->
+                <div id="alert-error" class="state-hidden bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
+                    <p class="font-medium">⚠️ 錯誤</p>
+                    <p id="form-error-message" class="text-sm mt-1"></p>
+                </div>
+
+                <!-- Email Form -->
+                <form id="email-form" class="space-y-6">
+                    <!-- Hidden fields populated by JavaScript -->
+                    <input type="hidden" id="line_sub" name="line_sub" value="">
+                    <input type="hidden" id="line_id_token" name="line_id_token" value="">
+                    <input type="hidden" id="app_context" name="app_context" value="{{APP_CONTEXT}}">
+
+                    <div>
+                        <label for="email" class="block text-sm font-medium text-gray-700 mb-2">
+                            電子郵件 / Email
+                        </label>
+                        <input type="email" 
+                               id="email" 
+                               name="email" 
+                               placeholder="your.name@company.com" 
+                               required
+                               autocomplete="email"
+                               class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base transition-all">
+                    </div>
+
+                    <button type="submit" 
+                            id="submit-btn"
+                            class="w-full py-4 bg-gradient-to-r from-line-green to-green-500 hover:from-line-green-dark hover:to-green-600 text-white font-semibold rounded-lg transition-all transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none">
+                        <span id="submit-text">📧 發送驗證連結</span>
+                        <span id="submit-loading" class="state-hidden">
+                            <span class="inline-block w-5 h-5 border-2 border-white border-t-transparent rounded-full spinner"></span>
+                            發送中...
+                        </span>
+                    </button>
+                </form>
+
+                <!-- User Info Display -->
+                <div id="user-info" class="mt-6 pt-6 border-t border-gray-100 text-center text-sm text-gray-500">
+                    <p>LINE 帳號：<span id="line-display-name" class="font-medium text-gray-700">-</span></p>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Footer -->
+        <div class="px-8 pb-6 text-center">
+            <p class="text-xs text-gray-400">
+                連結有效期限 {{EXPIRE_MINUTES}} 分鐘 • {{APP_NAME}}
+            </p>
+        </div>
+
+    </div>
+
+    <script>
+        /**
+         * Framework-First Authentication - Login Page
+         * 
+         * Flow:
+         * 1. Initialize LIFF SDK with injected LIFF ID
+         * 2. Get user profile and ID token from LINE
+         * 3. User enters company email
+         * 4. POST to /auth/request-magic-link with email, id_token, app_context
+         * 5. Backend sends magic link email
+         */
+
+        // ============================================
+        // Configuration (Injected by Backend)
+        // ============================================
+        const CONFIG = {
+            liffId: '{{LIFF_ID}}',
+            appContext: '{{APP_CONTEXT}}',
+            appName: '{{APP_NAME}}',
+            apiEndpoint: '/auth/request-magic-link'
+        };
+
+        // ============================================
+        // DOM Elements
+        // ============================================
+        const stateLoading = document.getElementById('state-loading');
+        const stateError = document.getElementById('state-error');
+        const stateForm = document.getElementById('state-form');
+        const errorMessage = document.getElementById('error-message');
+        const emailForm = document.getElementById('email-form');
+        const alertSuccess = document.getElementById('alert-success');
+        const alertError = document.getElementById('alert-error');
+        const formErrorMessage = document.getElementById('form-error-message');
+        const successEmail = document.getElementById('success-email');
+        const lineDisplayName = document.getElementById('line-display-name');
+        const submitBtn = document.getElementById('submit-btn');
+        const submitText = document.getElementById('submit-text');
+        const submitLoading = document.getElementById('submit-loading');
+
+        // ============================================
+        // State Management
+        // ============================================
+
+        function showState(state) {
+            stateLoading.classList.toggle('state-hidden', state !== 'loading');
+            stateError.classList.toggle('state-hidden', state !== 'error');
+            stateForm.classList.toggle('state-hidden', state !== 'form');
+        }
+
+        function showFormError(message) {
+            alertError.classList.remove('state-hidden');
+            alertSuccess.classList.add('state-hidden');
+            formErrorMessage.textContent = message;
+        }
+
+        function showFormSuccess(email) {
+            alertSuccess.classList.remove('state-hidden');
+            alertError.classList.add('state-hidden');
+            successEmail.textContent = `請檢查 ${email} 的信箱`;
+        }
+
+        function showInitError(message) {
+            errorMessage.textContent = message;
+            showState('error');
+        }
+
+        function setSubmitLoading(loading) {
+            submitBtn.disabled = loading;
+            submitText.classList.toggle('state-hidden', loading);
+            submitLoading.classList.toggle('state-hidden', !loading);
+        }
+
+        // ============================================
+        // LIFF Initialization
+        // ============================================
+
+        async function initializeLiff() {
+            // Validate LIFF ID
+            if (!CONFIG.liffId || CONFIG.liffId === '{{LIFF_ID}}') {
+                showInitError('LIFF ID 未設定，請聯繫管理員');
+                return;
+            }
+
+            try {
+                await liff.init({ liffId: CONFIG.liffId });
+                console.info('LIFF initialized successfully');
+
+                // Check if user is logged in
+                if (!liff.isLoggedIn()) {
+                    // In LIFF browser, this redirects to LINE login
+                    liff.login();
+                    return;
+                }
+
+                // Get user profile
+                const profile = await liff.getProfile();
+                lineDisplayName.textContent = profile.displayName;
+
+                // Get ID token for backend verification
+                const idToken = liff.getIDToken();
+                if (!idToken) {
+                    showInitError('無法取得 LINE ID Token，請重新開啟');
+                    return;
+                }
+
+                // Decode ID token to get 'sub' (LINE user ID)
+                // Note: We send both id_token (for backend verification) and extract sub for display
+                const tokenPayload = parseJwt(idToken);
+                const lineSub = tokenPayload?.sub || '';
+
+                // Populate hidden fields
+                document.getElementById('line_sub').value = lineSub;
+                document.getElementById('line_id_token').value = idToken;
+
+                // Show the form
+                showState('form');
+
+            } catch (error) {
+                console.error('LIFF initialization failed:', error);
+                showInitError(`LINE 登入失敗: ${error.message}`);
+            }
+        }
+
+        /**
+         * Parse JWT token payload (client-side, no verification)
+         */
+        function parseJwt(token) {
+            try {
+                const base64Url = token.split('.')[1];
+                const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                const jsonPayload = decodeURIComponent(
+                    atob(base64).split('').map(c => 
+                        '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
+                    ).join('')
+                );
+                return JSON.parse(jsonPayload);
+            } catch (e) {
+                console.error('Failed to parse JWT:', e);
+                return null;
+            }
+        }
+
+        // ============================================
+        // Form Submission
+        // ============================================
+
+        async function handleFormSubmit(event) {
+            event.preventDefault();
+            
+            // Hide previous alerts
+            alertSuccess.classList.add('state-hidden');
+            alertError.classList.add('state-hidden');
+
+            const email = document.getElementById('email').value.trim().toLowerCase();
+            const lineSub = document.getElementById('line_sub').value;
+            const lineIdToken = document.getElementById('line_id_token').value;
+            const appContext = document.getElementById('app_context').value;
+
+            if (!email) {
+                showFormError('請輸入電子郵件');
+                return;
+            }
+
+            if (!lineSub) {
+                showFormError('LINE 身份驗證失敗，請重新開啟');
+                return;
+            }
+
+            setSubmitLoading(true);
+
+            try {
+                const response = await fetch(CONFIG.apiEndpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: new URLSearchParams({
+                        email: email,
+                        line_sub: lineSub,
+                        line_id_token: lineIdToken,
+                        app_context: appContext
+                    })
+                });
+
+                // Check if response is HTML (legacy endpoint) or JSON
+                const contentType = response.headers.get('content-type');
+                
+                if (contentType && contentType.includes('application/json')) {
+                    // JSON response
+                    const data = await response.json();
+                    if (response.ok) {
+                        showFormSuccess(email);
+                    } else {
+                        showFormError(data.detail || data.message || '發送失敗，請重試');
+                    }
+                } else {
+                    // HTML response (legacy) - check status code
+                    if (response.ok) {
+                        showFormSuccess(email);
+                    } else {
+                        const html = await response.text();
+                        // Try to extract error from HTML if possible
+                        const errorMatch = html.match(/alert-error[^>]*>.*?<\/div>/s);
+                        showFormError('發送失敗，請確認電子郵件是否正確');
+                    }
+                }
+
+            } catch (error) {
+                console.error('Form submission error:', error);
+                showFormError('網路錯誤，請檢查連線後重試');
+            } finally {
+                setSubmitLoading(false);
+            }
+        }
+
+        // ============================================
+        // Bootstrap
+        // ============================================
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Bind form submit handler
+            emailForm.addEventListener('submit', handleFormSubmit);
+
+            // Initialize LIFF
+            initializeLiff();
+        });
+    </script>
+
+</body>
+
+</html>

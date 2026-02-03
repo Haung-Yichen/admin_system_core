@@ -36,6 +36,10 @@ class MagicLinkRequest(BaseModel):
     email: EmailStr = Field(..., description="Employee email address")
     line_sub: str = Field(..., min_length=1,
                           description="LINE sub (OIDC Subject Identifier)")
+    app_context: Optional[str] = Field(
+        None, 
+        description="App context for LIFF ID selection (e.g., 'admin', 'chatbot')"
+    )
 
 
 class MagicLinkResponse(BaseModel):

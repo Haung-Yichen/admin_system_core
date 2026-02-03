@@ -43,7 +43,27 @@ Admin System Core 採用 **Modular Monolith (模組化單體)** 架構。
         *   透過 `EncryptedType` 在 ORM 層自動加解密。
         *   支援 `Blind Index` 機制，讓加密欄位仍可進行精確搜尋 (Exact Match)。
 
-### 4. 核心模型 (Core Models)
+### 4. 身份驗證與授權 (Authentication & Identity)
+
+採用 **Framework-First Authentication** 設計，統一全系統的登入與註冊流程。
+
+*   **原則**: 所有模組 (Administrative, Chatbot 等) 共用同一套認證機制，模組不需各自實作登入頁面。
+*   **介面層 (UI Layer)**:
+    *   **模板路徑**: `core/static/auth/`
+    *   **技術**: 原生 HTML5/TailwindCSS 模板，由後端直接渲染。
+    *   **頁面**:
+        *   `login.html`: 輸入 Email 請求 Magic Link。
+        *   `verify.html`: 接收 Magic Link Token 並自動驗證。
+        *   `success.html`: 驗證成功頁面。
+        *   `error.html`: 錯誤處理頁面。
+*   **流程 (Flow)**:
+    1.  **未驗證攔截**: 當使用者觸發需授權功能時，模組拋出 `AccountNotBoundResponse`。
+    2.  **引導登入**: Line Client 顯示 "身份驗證" 卡片，引導至 `/auth/login?line_sub={ID}&app={APP}`。
+    3.  **動態 LIFF 注入**: 根據 URL 的 `app` 參數，自動注入對應的 LIFF ID，確保 `liff.closeWindow()` 能正常運作。
+    4.  **Magic Link**: 使用者輸入 Email，系統比對 `ragic_registry` 與 DB。
+    5.  **自動註冊**: 若 Email 存在於 Ragic 員工表但未在本地註冊，系統將自動完成註冊並綁定。
+
+### 5. 核心模型 (Core Models)
 *   **路徑**: `core/models/`
 *   **User Model**: 系統級的使用者身份模型，包含：
     *   **Line User ID**: 用於訊息推播與身份識別。
@@ -52,7 +72,7 @@ Admin System Core 採用 **Modular Monolith (模組化單體)** 架構。
 *   **UsedToken Model**: 追蹤已使用的 Magic Link Token，防止重複使用。
 *   **欄位定義 (SSOT)**: `ragic_registry.json` 作為 Ragic 欄位 ID 與表單設定的唯一真理來源，避免硬編碼。
 
-### 5. Ragic 統一整合層 (Unified Ragic Integration)
+### 6. Ragic 統一整合層 (Unified Ragic Integration)
 
 提供標準化、型別安全的方式與 Ragic 資料庫互動。
 
@@ -68,7 +88,7 @@ Admin System Core 採用 **Modular Monolith (模組化單體)** 架構。
     *   **Repository Pattern**: 用於即時 CRUD 操作 (`RagicRepository`)。
     *   **Sync Pattern**: 用於將 Ragic 資料快取至本地資料庫 (`BaseRagicSyncService`)。
 
-### 6. 基礎設施服務 (Infrastructure)
+### 7. 基礎設施服務 (Infrastructure)
 *   **LineClient** (`services/line_client.py`): 底層 LINE API 用戶端，負責 HTTP 通訊與簽章驗證。
 
 ---
@@ -120,7 +140,8 @@ Admin System Core 採用 **Modular Monolith (模組化單體)** 架構。
 
 ### 1. 認證與授權 (Unified Auth)
 Prefix: `/auth`
-*   主要處理使用者 Magic Link 登入流程。
+*   **Framework-First Design**: 核心統一處理所有模組的認證需求。
+*   主要處理使用者 Magic Link 登入流程與 LIFF 整合。
 *   由 `core.api.auth` 提供。
 
 ### 2. 管理員認證 (Admin Auth)
@@ -135,8 +156,8 @@ Prefix: `/api/admin/auth`
 | 路徑                   | 方法 | 說明                            |
 | ---------------------- | ---- | ------------------------------- |
 | `/auth/login`          | GET  | Magic Link 登入頁面 (HTML)      |
-| `/auth/request-magic-link` | POST | 發送驗證信 (Form)           |
-| `/auth/verify`         | GET  | 驗證 Token 並綁定帳號           |
+| `/auth/request-magic-link` | POST | 發送驗證信 (Form Submit)         |
+| `/auth/verify`         | GET  | 驗證 Token 並綁定帳號 (HTML)    |
 | `/auth/magic-link`     | POST | 發送驗證信 (JSON API)           |
 | `/auth/api/verify`     | POST | 驗證 Token (JSON API)           |
 | `/auth/stats`          | GET  | 使用者統計                      |

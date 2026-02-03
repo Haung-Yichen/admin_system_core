@@ -116,7 +116,7 @@ class LineAuthMessages:
             "type": "bubble",
             "hero": {
                 "type": "image",
-                "url": f"{base_url}/static/crown.png",
+                "url": f"{base_url}/static/crown.png?v=1",
                 "size": "full",
                 "aspectRatio": "20:13",
                 "aspectMode": "fit",
@@ -128,7 +128,7 @@ class LineAuthMessages:
                 "contents": [
                     {
                         "type": "text",
-                        "text": "身份驗證",
+                        "text": "員工身份驗證",
                         "weight": "bold",
                         "size": "xl",
                         "align": "center",
@@ -152,7 +152,7 @@ class LineAuthMessages:
                         "type": "button",
                         "action": {
                             "type": "uri",
-                            "label": "📧 驗證身份",
+                            "label": "驗證身份",
                             "uri": login_url,
                         },
                         "style": "primary",

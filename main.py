@@ -133,6 +133,11 @@ def create_fastapi_app(context: AppContext, registry: ModuleRegistry) -> FastAPI
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
+    # Mount core framework static files (auth pages, etc.)
+    core_static_dir = Path(__file__).parent / "core" / "static"
+    if core_static_dir.exists():
+        app.mount("/static/core", StaticFiles(directory=str(core_static_dir)), name="core-static")
+
     return app
 
 

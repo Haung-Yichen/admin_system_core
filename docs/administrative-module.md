@@ -26,7 +26,7 @@ modules/administrative/
 │   └── config.py                   # 模組配置 (ADMIN_ 環境變數)
 ├── messages/
 │   ├── __init__.py
-│   └── menu.py                     # Flex Message 模板
+│   └── menu.py                     # Flex Message 模板 (Auth 卡片已移至 Core)
 ├── models/
 │   ├── __init__.py
 │   ├── account.py                  # AdministrativeAccount 模型 (含部門資訊)
@@ -62,7 +62,7 @@ modules/administrative/
 
 ### AdministrativeModule (模組入口)
 
-位於 `administrative_module.py`，實作 `IAppModule` 介面：
+位於 `administrative_module.py`，實作 `IAppModule` 介面。由於採用 Framework-First Auth，模組無需處理使用者驗證邏輯，僅需在收到 `AccountNotBound` 異常時確保核心會接手處理。
 
 ```python
 class AdministrativeModule(IAppModule):
@@ -85,10 +85,15 @@ class AdministrativeModule(IAppModule):
         }
     
     def on_entry(self, context: AppContext) -> None:
+        """
+        模組初始化入口。
+        注意：不在此處處理 Auth，認證邏輯由 core 統一接管。
+        """
         # 初始化 API routers
         self._api_router = APIRouter(prefix="/administrative")
         self._api_router.include_router(leave_router)
         self._api_router.include_router(liff_router)
+
         
         # 註冊 Sync 服務
         from modules.administrative.services import get_account_sync_service

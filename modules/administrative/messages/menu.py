@@ -291,7 +291,7 @@ def create_auth_required_flex(line_user_id: str) -> dict[str, Any]:
         "type": "bubble",
         "hero": {
             "type": "image",
-            "url": f"{base_url}/static/crown.png",
+            "url": f"{base_url}/static/crown.png?v=2",
             "size": "full",
             "aspectRatio": "20:13",
             "aspectMode": "fit",
@@ -303,7 +303,7 @@ def create_auth_required_flex(line_user_id: str) -> dict[str, Any]:
             "contents": [
                 {
                     "type": "text",
-                    "text": "身份驗證",
+                    "text": "員工身份驗證",
                     "weight": "bold",
                     "size": "xl",
                     "align": "center",
@@ -328,7 +328,7 @@ def create_auth_required_flex(line_user_id: str) -> dict[str, Any]:
                     "type": "button",
                     "action": {
                         "type": "uri",
-                        "label": "📧 驗證身份",
+                        "label": "驗證身份",
                         "uri": login_url,
                     },
                     "style": "primary",

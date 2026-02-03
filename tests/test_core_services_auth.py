@@ -115,11 +115,36 @@ class TestAuthService:
 
     def test_generate_magic_link(self, auth_service, mock_env_vars):
         """Test generate_magic_link() creates valid URL."""
+        # By default (from conftest.py or setup), _liff_id_verify might be empty or mocked
+        # Let's ensure it's empty to test the standard link
+        auth_service._liff_id_verify = ""
+        
         link = auth_service.generate_magic_link(
             "test@example.com", "U1234567890")
 
         # Updated path without /api/ prefix
         assert "https://test.example.com/auth/verify?token=" in link
+        
+    def test_generate_magic_link_with_app_context(self, auth_service):
+        """Test generate_magic_link() includes app context."""
+        auth_service._liff_id_verify = "" # Force web link
+        
+        link = auth_service.generate_magic_link(
+            "test@example.com", "U1234567890", app_context="chatbot")
+            
+        assert "app=chatbot" in link
+        assert "https://test.example.com/auth/verify?" in link
+
+    def test_generate_magic_link_liff(self, auth_service):
+        """Test generate_magic_link() returns LIFF URL when configured."""
+        auth_service._liff_id_verify = "12345-abcde"
+        
+        link = auth_service.generate_magic_link(
+            "test@example.com", "U1234567890", app_context="admin")
+            
+        assert "https://liff.line.me/12345-abcde" in link
+        assert "app=admin" in link
+        assert "token=" in link
 
     def test_get_auth_service_singleton(self, mock_env_vars):
         """Test get_auth_service() returns singleton."""

@@ -396,6 +396,7 @@ class AuthService:
         self,
         email: str,
         line_sub: str,
+        app_context: str | None = None,
     ) -> str:
         """
         Initiate magic link authentication flow for LINE account binding.
@@ -409,6 +410,8 @@ class AuthService:
         Args:
             email: Company email address to bind.
             line_sub: LINE ID Token 'sub' claim.
+            app_context: Optional app context (e.g., 'admin', 'chatbot') for
+                        determining which LIFF ID to use in the magic link.
 
         Returns:
             str: Generic status message (always the same, regardless of email validity).
@@ -440,7 +443,7 @@ class AuthService:
                 )
                 return self.MAGIC_LINK_SUCCESS_MESSAGE
 
-            magic_link = self.generate_magic_link(email, line_sub)
+            magic_link = self.generate_magic_link(email, line_sub, app_context=app_context)
 
             await self._send_verification_email(
                 to_email=email,
@@ -481,24 +484,40 @@ class AuthService:
             masked_local = local[:2] + "***"
         return f"{masked_local}@{domain}"
 
-    def generate_magic_link(self, email: str, line_sub: str) -> str:
+    def generate_magic_link(self, email: str, line_sub: str, app_context: str | None = None) -> str:
         """
         Generate a magic link URL with signed JWT token.
         
-        If ADMIN_LINE_LIFF_ID_VERIFY is configured, returns a LIFF deep link.
+        If LIFF ID is configured (based on app_context), returns a LIFF deep link.
         Otherwise, returns a standard web link.
+        
+        Args:
+            email: User's company email
+            line_sub: LINE user identifier
+            app_context: Optional app context (e.g., 'admin', 'chatbot') for
+                        determining which LIFF ID to use and propagating context
+                        through the verification flow.
+        
+        Returns:
+            Magic link URL (either LIFF deep link or standard web link)
         """
         from core.services.auth_token import create_magic_link_token
 
         token = create_magic_link_token(email, line_sub)
+        
+        # Build query params - always include app if provided
+        params = {"token": token}
+        if app_context:
+            params["app"] = app_context
 
         # Prefer LIFF deep link if configured
         if self._liff_id_verify:
-            query_params = urlencode({"token": token})
+            query_params = urlencode(params)
             return f"https://liff.line.me/{self._liff_id_verify}?{query_params}"
 
         base_url = self._config_loader.get("server.base_url", "")
-        return f"{base_url}/auth/verify?token={token}"
+        query_params = urlencode(params)
+        return f"{base_url}/auth/verify?{query_params}"
 
     async def verify_magic_token(
         self,
