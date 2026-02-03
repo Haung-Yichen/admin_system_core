@@ -7,8 +7,8 @@ Serves LIFF HTML pages for LINE integration.
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import APIRouter, Request
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from modules.administrative.core.config import get_admin_settings
 
@@ -85,7 +85,7 @@ async def serve_leave_form_js() -> FileResponse:
     summary="Email Verification Redirect",
     description="Serve the LIFF verification redirect page for email deep linking.",
 )
-async def serve_verify_redirect() -> FileResponse:
+async def serve_verify_redirect(request: Request) -> RedirectResponse:
     """
     Serve the LIFF email verification redirect page.
 
@@ -95,24 +95,15 @@ async def serve_verify_redirect() -> FileResponse:
     LIFF Endpoint should be set to:
     https://your-domain.com/api/administrative/liff/verify-redirect
     """
-    html_path = STATIC_DIR / "verify_redirect.html"
-
-    if not html_path.exists():
-        logger.error(f"Verify redirect page not found: {html_path}")
-        return HTMLResponse(
-            content="<html><body><h1>Page Not Found</h1></body></html>",
-            status_code=404,
-        )
-
-    # Prevent token caching - critical for security
-    response = FileResponse(
-        path=html_path,
-        media_type="text/html",
+    import time
+    # Redirect to the unified framework auth page
+    # This prevents code duplication and ensures consistent UI/UX
+    query_params = request.query_params
+    timestamp = int(time.time())
+    return RedirectResponse(
+        url=f"/auth/page/verify-result?{query_params}&t={timestamp}",
+        status_code=302
     )
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    return response
 
 
 @router.get(

@@ -4,6 +4,331 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>驗證中... - {{APP_NAME}}</title>
+
+    <!-- LIFF SDK -->
+    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap"
+        rel="stylesheet">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', '"Noto Sans TC"', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#f0fdf4',
+                            100: '#dcfce7',
+                            500: '#22c55e', // Success Green
+                            600: '#16a34a',
+                            900: '#14532d',
+                        },
+                        error: {
+                            50: '#fef2f2',
+                            100: '#fee2e2',
+                            500: '#ef4444',
+                            600: '#dc2626',
+                        }
+                    },
+                    animation: {
+                        'bounce-slow': 'bounce 3s infinite',
+                        'fade-in': 'fadeIn 0.5s ease-out forwards',
+                        'scale-up': 'scaleUp 0.4s ease-out forwards',
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0', transform: 'translateY(10px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        },
+                        scaleUp: {
+                            '0%': { opacity: '0', transform: 'scale(0.95)' },
+                            '100%': { opacity: '1', transform: 'scale(1)' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Modern Gradient Background */
+        body {
+            background: radial-gradient(circle at top right, #dcfce7 0%, transparent 40%),
+                radial-gradient(circle at bottom left, #e0e7ff 0%, transparent 40%),
+                #f8fafc;
+        }
+
+        /* Glassmorphism Card */
+        .glass-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.05),
+                0 0 15px rgba(0, 0, 0, 0.02);
+        }
+
+        /* Hide Scrollbar */
+        ::-webkit-scrollbar {
+            width: 0px;
+            background: transparent;
+        }
+
+        /* Utility */
+        .hidden-force {
+            display: none !important;
+        }
+    </style>
+</head>
+
+<body class="min-h-screen flex items-center justify-center p-4 text-slate-800">
+
+    <div class="glass-card w-full max-w-[420px] rounded-3xl overflow-hidden relative transition-all duration-300">
+
+        <!-- Decorative Header -->
+        <div class="h-2 bg-gradient-to-r from-emerald-400 via-teal-500 to-cyan-500 w-full"></div>
+
+        <div class="p-8 md:p-10 text-center relative z-10">
+
+            <!-- STATE: LOADING -->
+            <div id="view-loading" class="flex flex-col items-center justify-center py-8">
+                <div class="relative w-20 h-20 mb-8">
+                    <div class="absolute inset-0 border-4 border-slate-100 rounded-full"></div>
+                    <div
+                        class="absolute inset-0 border-4 border-emerald-500 rounded-full border-t-transparent animate-spin">
+                    </div>
+                    <!-- Brand Icon Center -->
+                    <div class="absolute inset-0 flex items-center justify-center">
+                        <svg class="w-8 h-8 text-emerald-500 opacity-50" fill="none" stroke="currentColor"
+                            viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z">
+                            </path>
+                        </svg>
+                    </div>
+                </div>
+                <h2 class="text-2xl font-bold mb-3 tracking-tight">安全驗證中</h2>
+                <p class="text-slate-500 text-sm font-medium animate-pulse">正在確認您的身份，請稍候...</p>
+            </div>
+
+            <!-- STATE: SUCCESS -->
+            <div id="view-success" class="hidden-force flex flex-col items-center justify-center animate-scale-up py-4">
+                <div
+                    class="w-24 h-24 bg-emerald-50 rounded-full flex items-center justify-center mb-6 ring-8 ring-emerald-50/50">
+                    <svg class="w-12 h-12 text-emerald-500 drop-shadow-sm" fill="none" stroke="currentColor"
+                        viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7">
+                        </path>
+                    </svg>
+                </div>
+                <h2 class="text-2xl font-bold text-slate-800 mb-2">驗證成功！</h2>
+                <p class="text-slate-500 mb-8 leading-relaxed">您的帳號已成功綁定。<br>視窗將在 <span id="countdown"
+                        class="font-bold text-emerald-600">3</span> 秒後自動關閉。</p>
+
+                <button onclick="closeWindow()"
+                    class="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold shadow-lg shadow-slate-200 transition-all active:scale-95">
+                    立即關閉
+                </button>
+            </div>
+
+            <!-- STATE: ERROR -->
+            <div id="view-error" class="hidden-force flex flex-col items-center justify-center animate-scale-up py-4">
+                <div
+                    class="w-24 h-24 bg-red-50 rounded-full flex items-center justify-center mb-6 ring-8 ring-red-50/50">
+                    <svg class="w-12 h-12 text-red-500 drop-shadow-sm" fill="none" stroke="currentColor"
+                        viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                            d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </div>
+                <h2 class="text-2xl font-bold text-slate-800 mb-2">驗證失敗</h2>
+                <p id="error-msg" class="text-slate-500 mb-6 leading-relaxed">連結可能已過期或失效</p>
+
+                <div class="w-full bg-red-50 p-4 rounded-xl border border-red-100 mb-8 text-left">
+                    <p class="text-xs font-bold text-red-800 uppercase tracking-wider mb-1">Error Details</p>
+                    <p id="error-detail" class="text-sm text-red-600 font-mono break-all">Unknown Error</p>
+                </div>
+
+                <button onclick="closeWindow()"
+                    class="w-full py-4 bg-white border-2 border-slate-200 hover:border-slate-300 text-slate-700 rounded-xl font-bold transition-all active:scale-95">
+                    關閉視窗
+                </button>
+            </div>
+
+        </div>
+
+        <!-- Footer -->
+        <div class="py-4 bg-slate-50/50 text-center border-t border-slate-100">
+            <p class="text-[10px] font-bold text-slate-300 tracking-widest uppercase">{{APP_NAME}} &copy; SECURE SYSTEM
+            </p>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * Rebuilt Verification Logic V2.0 (Backup Static)
+         * "Strict State Machine"
+         */
+
+        // Configuration
+        const CONFIG = {
+            // Note: In static fallback, we try to detect config or default
+            liffId: "{{LIFF_ID}}",
+            apiEndpoint: "/auth/api/verify",
+            autoCloseDelay: 3000
+        };
+
+        // DOM Elements
+        const views = {
+            loading: document.getElementById('view-loading'),
+            success: document.getElementById('view-success'),
+            error: document.getElementById('view-error')
+        };
+        const els = {
+            countdown: document.getElementById('countdown'),
+            errorMsg: document.getElementById('error-msg'),
+            errorDetail: document.getElementById('error-detail')
+        };
+
+        // State Machine
+        let currentState = 'loading'; // loading | success | error
+
+        function switchState(state, data = {}) {
+            console.log(`[State Change] ${currentState} -> ${state}`, data);
+            currentState = state;
+
+            // Hide all
+            Object.values(views).forEach(el => el.classList.add('hidden-force'));
+
+            // Show target
+            if (views[state]) {
+                views[state].classList.remove('hidden-force');
+            }
+
+            // Specific Logic
+            if (state === 'success') {
+                startAutoClose();
+                document.title = '驗證成功';
+            } else if (state === 'error') {
+                els.errorMsg.textContent = data.msg || '發生未知錯誤';
+                els.errorDetail.textContent = data.detail || 'CODE: UNKNOWN';
+                document.title = '驗證失敗';
+            }
+        }
+
+        // ==========================================
+        // Core Logic
+        // ==========================================
+
+        async function main() {
+            try {
+                // Initialize LIFF logic if needed
+                initLiff();
+
+                const urlParams = new URLSearchParams(window.location.search);
+                const token = urlParams.get('token');
+
+                if (!token) {
+                    throw { msg: "連結無效", detail: "Missing 'token' parameter" };
+                }
+
+                const result = await callVerifyApi(token);
+
+                if (result.success) {
+                    switchState('success');
+                } else {
+                    throw { msg: "驗證失敗", detail: result.message || "API returned false" };
+                }
+
+            } catch (err) {
+                console.error("Verification Critical Error:", err);
+                const msg = err.msg || "系統發生錯誤";
+                const detail = err.detail || err.message || JSON.stringify(err);
+
+                let userMsg = msg;
+                if (detail.includes("expired")) userMsg = "驗證連結已過期";
+                if (detail.includes("not found")) userMsg = "無效的驗證碼";
+                if (detail.includes("used")) userMsg = "此連結已被使用";
+
+                switchState('error', { msg: userMsg, detail: detail });
+            }
+        }
+
+        async function callVerifyApi(token) {
+            const res = await fetch(CONFIG.apiEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: token })
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+                throw {
+                    msg: data.message || "伺服器錯誤",
+                    detail: data.detail || `HTTP ${res.status}`
+                };
+            }
+            return data;
+        }
+
+        // ==========================================
+        // Helper / Side Effects
+        // ==========================================
+
+        function startAutoClose() {
+            let timeLeft = 3;
+            const timer = setInterval(() => {
+                timeLeft -= 1;
+                if (els.countdown) els.countdown.textContent = timeLeft;
+                if (timeLeft <= 0) {
+                    clearInterval(timer);
+                    closeWindow();
+                }
+            }, 1000);
+        }
+
+        function closeWindow() {
+            if (typeof liff !== 'undefined' && liff.isInClient && liff.isInClient()) {
+                liff.closeWindow();
+            } else {
+                window.close();
+                document.body.innerHTML = '<div style="display:flex;height:100vh;align-items:center;justify-content:center;background:#f0fdf4;color:#166534;"><div style="text-align:center;"><h1>您可以關閉此頁面了</h1></div></div>';
+            }
+        }
+
+        async function initLiff() {
+            // Safe check for template variables in legacy mode
+            const id = CONFIG.liffId;
+            if (!id || id.includes("{{")) return;
+
+            try {
+                await liff.init({ liffId: id });
+            } catch (e) {
+                console.warn("LIFF Init failed:", e);
+            }
+        }
+
+        window.onload = main;
+
+    </script>
+</body>
+
+</html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>驗證中 - HSIB Admin System</title>
 
     <!-- LIFF SDK (Official CDN) - Must load before app script -->
@@ -197,7 +522,7 @@
         // ============================================
         // Lock title BEFORE any async operations
         document.title = '驗證中...';
-        
+
         // Execution guard - prevent duplicate runs
         if (window.hasRun) {
             console.warn('main() already executed, skipping duplicate run');
@@ -242,7 +567,7 @@
             loadingState.classList.toggle('hidden', state !== 'loading');
             successState.classList.toggle('hidden', state !== 'success');
             errorState.classList.toggle('hidden', state !== 'error');
-            
+
             // Update document title based on state
             if (state === 'success') {
                 document.title = '驗證成功 - HSIB Admin System';
@@ -276,7 +601,7 @@
         function showSuccess() {
             // Step 1: Immediately show success UI
             showState('success');
-            
+
             // Step 2: Check LIFF status for close behavior (delayed check)
             checkLiffAndSetupClose();
         }
@@ -289,7 +614,7 @@
             // Wait a brief moment for LIFF to potentially complete
             // But don't block - use a reasonable timeout
             const liffCheckTimeout = 1500; // 1.5 seconds max wait
-            
+
             try {
                 // Race between LIFF init and timeout
                 if (liffInitPromise) {
@@ -304,17 +629,17 @@
             }
 
             // Now check if LIFF is actually ready and in client
-            const canAutoClose = isLiffReady && 
-                                 typeof liff !== 'undefined' && 
-                                 typeof liff.isInClient === 'function' && 
-                                 liff.isInClient();
+            const canAutoClose = isLiffReady &&
+                typeof liff !== 'undefined' &&
+                typeof liff.isInClient === 'function' &&
+                liff.isInClient();
 
             if (canAutoClose) {
                 // LIFF is ready - auto close after delay
                 successHint.textContent = '視窗即將自動關閉...';
                 successHint.classList.remove('hidden');
                 manualCloseBtn.classList.add('hidden');
-                
+
                 setTimeout(() => {
                     closeWindow();
                 }, CLOSE_DELAY_MS);
@@ -416,7 +741,7 @@
         async function initializeLiffBackground() {
             try {
                 const liffId = await getLiffId();
-                
+
                 if (!liffId) {
                     console.info('LIFF ID not configured, auto-close will be unavailable');
                     isLiffReady = false;
@@ -517,11 +842,11 @@
             // This is the ONLY thing that determines success/failure UI
             try {
                 await verifyToken(token);
-                
+
                 // ========== Step 5: API SUCCESS - Show Success ==========
                 // LIFF status is checked AFTER showing success
                 showSuccess();
-                
+
             } catch (error) {
                 // ========== Step 5: API FAILURE - Show Error ==========
                 // ONLY API errors reach here
@@ -534,7 +859,7 @@
         // ============================================
         // Bootstrap
         // ============================================
-        
+
         // Start the verification flow when DOM is ready
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', main, { once: true });

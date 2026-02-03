@@ -12,6 +12,7 @@ from typing import Any, Optional, TYPE_CHECKING
 
 from fastapi import APIRouter
 
+from core.http_client import create_standalone_http_client
 from core.interface import IAppModule
 from core.ragic import get_sync_manager
 from modules.administrative.core.config import get_admin_settings
@@ -152,15 +153,17 @@ class AdministrativeModule(IAppModule):
                 logger.info("Starting Ragic data sync...")
                 self._sync_status["status"] = "syncing"
 
-                # Sync accounts using new service
-                account_result = await self._account_sync_service.sync_all_data()
-                self._sync_status["accounts"] = account_result.synced
-                self._sync_status["skipped"] = account_result.skipped
+                # Use standalone HTTP client for background task
+                async with create_standalone_http_client() as http_client:
+                    # Sync accounts using new service
+                    account_result = await self._account_sync_service.sync_all_data(http_client)
+                    self._sync_status["accounts"] = account_result.synced
+                    self._sync_status["skipped"] = account_result.skipped
 
-                # Sync leave types using new service
-                leave_type_result = await self._leave_type_sync_service.sync_all_data()
-                self._sync_status["leave_types"] = leave_type_result.synced
-                self._sync_status["skipped"] += leave_type_result.skipped
+                    # Sync leave types using new service
+                    leave_type_result = await self._leave_type_sync_service.sync_all_data(http_client)
+                    self._sync_status["leave_types"] = leave_type_result.synced
+                    self._sync_status["skipped"] += leave_type_result.skipped
 
                 self._sync_status["status"] = "completed"
 

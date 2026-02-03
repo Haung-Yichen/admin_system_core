@@ -359,6 +359,7 @@ async def get_verify_result_page(
             "LIFF_ID": liff_id,
             "APP_CONTEXT": app_context,
             "APP_NAME": config["app_name"],
+            "TOKEN": token or "",
         })
         return HTMLResponse(content=html_content)
     except FileNotFoundError as e:
@@ -479,20 +480,25 @@ async def verify_magic_link(
             headers={"Location": f"/auth/api/verify?token={token}"}
         )
     
-    # Browser request - redirect to the verify result page
-    # The page will handle verification via JavaScript
-    if not token:
-        return HTMLResponse(
-            content=get_verification_result_html(False, "無效的連結：缺少驗證代碼。", app),
-            status_code=400
-        )
+    # Browser request - render the verification result page directly
+    # This avoids redirect issues and allows injecting the token if available
+    config = _get_app_config()
+    app_context = app or "default"
+    liff_id = _get_liff_id_for_app(app_context)
     
-    # Redirect to the new verify result page
-    app_param = f"&app={app}" if app else ""
-    return RedirectResponse(
-        url=f"/auth/page/verify-result?token={token}{app_param}",
-        status_code=302
-    )
+    token_val = token or ""
+    
+    try:
+        html_content = _render_template("verify_result.html", {
+            "LIFF_ID": liff_id,
+            "APP_CONTEXT": app_context,
+            "APP_NAME": config["app_name"],
+            "TOKEN": token_val,
+        })
+        return HTMLResponse(content=html_content)
+    except FileNotFoundError as e:
+        logger.error(f"Verify result template not found: {e}")
+        return HTMLResponse(content="System Error: Template not found", status_code=500)
 
 
 # =============================================================================

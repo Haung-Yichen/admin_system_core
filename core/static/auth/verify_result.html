@@ -4,27 +4,56 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>驗證中 - {{APP_NAME}}</title>
+    <title>驗證中... - {{APP_NAME}}</title>
 
-    <!-- LIFF SDK (Official CDN) - Must load before app script -->
-    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <!-- LIFF SDK -->
+    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap"
+        rel="stylesheet">
 
-    <!-- Tailwind CSS CDN -->
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
             theme: {
                 extend: {
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', '"Noto Sans TC"', 'sans-serif'],
+                    },
                     colors: {
-                        'line-green': '#06C755',
-                        'line-green-dark': '#05B34C',
-                        'primary': '#1A1A2E',
-                        'error-red': '#E74C3C',
+                        brand: {
+                            50: '#f0fdf4',
+                            100: '#dcfce7',
+                            500: '#22c55e', // Success Green
+                            600: '#16a34a',
+                            900: '#14532d',
+                        },
+                        error: {
+                            50: '#fef2f2',
+                            100: '#fee2e2',
+                            500: '#ef4444',
+                            600: '#dc2626',
+                        }
+                    },
+                    animation: {
+                        'bounce-slow': 'bounce 3s infinite',
+                        'fade-in': 'fadeIn 0.5s ease-out forwards',
+                        'scale-up': 'scaleUp 0.4s ease-out forwards',
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0', transform: 'translateY(10px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        },
+                        scaleUp: {
+                            '0%': { opacity: '0', transform: 'scale(0.95)' },
+                            '100%': { opacity: '1', transform: 'scale(1)' },
+                        }
                     }
                 }
             }
@@ -32,94 +61,107 @@
     </script>
 
     <style>
+        /* Modern Gradient Background */
         body {
-            font-family: 'Noto Sans TC', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: radial-gradient(circle at top right, #dcfce7 0%, transparent 40%),
+                radial-gradient(circle at bottom left, #e0e7ff 0%, transparent 40%),
+                #f8fafc;
         }
 
-        /* Custom spinner animation */
-        .spinner {
-            animation: spin 1s linear infinite;
+        /* Glassmorphism Card */
+        .glass-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.05),
+                0 0 15px rgba(0, 0, 0, 0.02);
         }
 
-        @keyframes spin {
-            to { transform: rotate(360deg); }
+        /* Hide Scrollbar */
+        ::-webkit-scrollbar {
+            width: 0px;
+            background: transparent;
         }
 
-        /* Success checkmark animation */
-        @keyframes checkmark {
-            0% { transform: scale(0); opacity: 0; }
-            50% { transform: scale(1.2); }
-            100% { transform: scale(1); opacity: 1; }
-        }
-
-        .checkmark-animated {
-            animation: checkmark 0.5s ease-out forwards;
-        }
-
-        /* Fade in animation */
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .fade-in {
-            animation: fadeIn 0.3s ease-out forwards;
-        }
-
-        /* State visibility */
-        .state-hidden {
+        /* Utility */
+        .hidden-force {
             display: none !important;
         }
     </style>
 </head>
 
-<body class="min-h-screen bg-gray-50 flex items-center justify-content-center p-4">
+<body class="min-h-screen flex items-center justify-center p-4 text-slate-800">
 
-    <div class="bg-white rounded-2xl shadow-lg max-w-md w-full mx-auto overflow-hidden">
+    <div class="glass-card w-full max-w-[420px] rounded-3xl overflow-hidden relative transition-all duration-300">
 
-        <div class="p-10 text-center">
+        <!-- Decorative Header -->
+        <div class="h-2 bg-gradient-to-r from-emerald-400 via-teal-500 to-cyan-500 w-full"></div>
 
-            <!-- Loading State -->
-            <div id="state-loading" class="state-container">
-                <div class="w-14 h-14 border-4 border-gray-200 border-t-line-green rounded-full spinner mx-auto mb-6"></div>
-                <h1 class="text-xl font-semibold text-gray-800 mb-3">驗證中...</h1>
-                <p class="text-gray-500">請稍候，正在驗證您的請求</p>
+        <div class="p-8 md:p-10 text-center relative z-10">
+
+            <!-- STATE: LOADING -->
+            <div id="view-loading" class="flex flex-col items-center justify-center py-8">
+                <div class="relative w-20 h-20 mb-8">
+                    <div class="absolute inset-0 border-4 border-slate-100 rounded-full"></div>
+                    <div
+                        class="absolute inset-0 border-4 border-emerald-500 rounded-full border-t-transparent animate-spin">
+                    </div>
+                    <!-- Brand Icon Center -->
+                    <div class="absolute inset-0 flex items-center justify-center">
+                        <svg class="w-8 h-8 text-emerald-500 opacity-50" fill="none" stroke="currentColor"
+                            viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z">
+                            </path>
+                        </svg>
+                    </div>
+                </div>
+                <h2 class="text-2xl font-bold mb-3 tracking-tight">安全驗證中</h2>
+                <p class="text-slate-500 text-sm font-medium animate-pulse">正在確認您的身份，請稍候...</p>
             </div>
 
-            <!-- Success State -->
-            <div id="state-success" class="state-container state-hidden">
-                <div class="w-20 h-20 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-6">
-                    <svg class="w-10 h-10 text-line-green checkmark-animated" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+            <!-- STATE: SUCCESS -->
+            <div id="view-success" class="hidden-force flex flex-col items-center justify-center animate-scale-up py-4"
+                style="display: none !important;">
+                <div
+                    class="w-24 h-24 bg-emerald-50 rounded-full flex items-center justify-center mb-6 ring-8 ring-emerald-50/50">
+                    <svg class="w-12 h-12 text-emerald-500 drop-shadow-sm" fill="none" stroke="currentColor"
+                        viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7">
+                        </path>
                     </svg>
                 </div>
-                <h1 class="text-xl font-semibold text-gray-800 mb-3">驗證成功！</h1>
-                <p class="text-gray-500 mb-2">您的 LINE 帳號已成功綁定</p>
-                <p id="success-hint" class="text-sm text-gray-400">視窗即將自動關閉...</p>
-                
-                <button id="close-btn" 
-                        onclick="closeWindow()"
-                        class="state-hidden mt-6 px-8 py-3 bg-line-green hover:bg-line-green-dark text-white font-medium rounded-full transition-colors">
-                    關閉視窗
+                <h2 class="text-2xl font-bold text-slate-800 mb-2">驗證成功！</h2>
+                <p class="text-slate-500 mb-8 leading-relaxed">您的帳號已成功綁定。<br>視窗將在 <span id="countdown"
+                        class="font-bold text-emerald-600">3</span> 秒後自動關閉。</p>
+
+                <button onclick="closeWindow()"
+                    class="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold shadow-lg shadow-slate-200 transition-all active:scale-95">
+                    立即關閉
                 </button>
             </div>
 
-            <!-- Error State -->
-            <div id="state-error" class="state-container state-hidden">
-                <div class="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
-                    <svg class="w-10 h-10 text-error-red" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"></path>
+            <!-- STATE: ERROR -->
+            <div id="view-error" class="hidden-force flex flex-col items-center justify-center animate-scale-up py-4"
+                style="display: none !important;">
+                <div
+                    class="w-24 h-24 bg-red-50 rounded-full flex items-center justify-center mb-6 ring-8 ring-red-50/50">
+                    <svg class="w-12 h-12 text-red-500 drop-shadow-sm" fill="none" stroke="currentColor"
+                        viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                            d="M6 18L18 6M6 6l12 12"></path>
                     </svg>
                 </div>
-                <h1 class="text-xl font-semibold text-gray-800 mb-3">驗證失敗</h1>
-                <p id="error-message" class="text-gray-500 mb-2">請重新嘗試或聯繫管理員</p>
-                
-                <div id="error-detail" class="state-hidden mt-4 p-3 bg-red-50 rounded-lg">
-                    <p id="error-detail-text" class="text-sm text-error-red break-words"></p>
+                <h2 class="text-2xl font-bold text-slate-800 mb-2">驗證失敗</h2>
+                <p id="error-msg" class="text-slate-500 mb-6 leading-relaxed">連結可能已過期或失效</p>
+
+                <div class="w-full bg-red-50 p-4 rounded-xl border border-red-100 mb-8 text-left">
+                    <p class="text-xs font-bold text-red-800 uppercase tracking-wider mb-1">Error Details</p>
+                    <p id="error-detail" class="text-sm text-red-600 font-mono break-all">Unknown Error</p>
                 </div>
-                
+
                 <button onclick="closeWindow()"
-                        class="mt-6 px-8 py-3 bg-gray-700 hover:bg-gray-800 text-white font-medium rounded-full transition-colors">
+                    class="w-full py-4 bg-white border-2 border-slate-200 hover:border-slate-300 text-slate-700 rounded-xl font-bold transition-all active:scale-95">
                     關閉視窗
                 </button>
             </div>
@@ -127,306 +169,223 @@
         </div>
 
         <!-- Footer -->
-        <div class="px-10 pb-6 text-center">
-            <p class="text-xs text-gray-400">{{APP_NAME}}</p>
+        <div class="py-4 bg-slate-50/50 text-center border-t border-slate-100">
+            <p class="text-[10px] font-bold text-slate-300 tracking-widest uppercase">{{APP_NAME}} &copy; SECURE SYSTEM
+            </p>
         </div>
-
     </div>
 
     <script>
         /**
-         * Framework-First Authentication - Verify Result Page
-         * 
-         * Architecture: UI State Locking + Fire-and-Forget LIFF
-         * 
-         * Key Principles:
-         * 1. UI State Locking: Loading state is LOCKED until API responds
-         * 2. API First: ONLY verifyToken() can change UI state
-         * 3. Background LIFF: liff.init() runs fire-and-forget, never blocks UI
-         * 4. Execution Guard: Prevents duplicate main() execution
-         * 
-         * Flow:
-         * 1. Extract token from URL (BEFORE LIFF can modify URL)
-         * 2. Start LIFF init in background (fire-and-forget)
-         * 3. Call /auth/api/verify to verify token
-         * 4. Show success/error based on API response
-         * 5. Auto-close if in LIFF client, otherwise show manual close button
+         * Rebuilt Verification Logic V2.0
+         * "Strict State Machine"
          */
 
-        // ============================================
-        // IMMEDIATE EXECUTION - Lock Loading State
-        // ============================================
-        document.title = '驗證中...';
-
-        // Execution guard - prevent duplicate runs
-        if (window.hasRun) {
-            console.warn('main() already executed, skipping duplicate run');
-        }
-
-        // ============================================
-        // Configuration (Injected by Backend)
-        // ============================================
+        // Configuration
         const CONFIG = {
-            liffId: '{{LIFF_ID}}',
-            appContext: '{{APP_CONTEXT}}',
-            appName: '{{APP_NAME}}',
-            apiEndpoint: '/auth/api/verify',
-            closeDelayMs: 2000
+            liffId: "{{LIFF_ID}}",
+            apiEndpoint: "/auth/api/verify",
+            autoCloseDelay: 3000,
+            serverToken: "{{TOKEN}}" // Server-side injection (optional)
         };
 
-        // ============================================
-        // Global State
-        // ============================================
-        let isLiffReady = false;
-        let liffInitPromise = null;
+        // DOM Elements
+        const views = {
+            loading: document.getElementById('view-loading'),
+            success: document.getElementById('view-success'),
+            error: document.getElementById('view-error')
+        };
+        const els = {
+            countdown: document.getElementById('countdown'),
+            errorMsg: document.getElementById('error-msg'),
+            errorDetail: document.getElementById('error-detail')
+        };
 
-        // ============================================
-        // DOM Elements (lazy init)
-        // ============================================
-        let stateLoading, stateSuccess, stateError;
-        let errorMessage, errorDetail, errorDetailText;
-        let successHint, closeBtn;
+        // State Machine
+        let currentState = 'loading'; // loading | success | error
+        let errorTimer = null; // Timer for debouncing error state
 
-        function initDomElements() {
-            stateLoading = document.getElementById('state-loading');
-            stateSuccess = document.getElementById('state-success');
-            stateError = document.getElementById('state-error');
-            errorMessage = document.getElementById('error-message');
-            errorDetail = document.getElementById('error-detail');
-            errorDetailText = document.getElementById('error-detail-text');
-            successHint = document.getElementById('success-hint');
-            closeBtn = document.getElementById('close-btn');
-        }
+        function switchState(state, data = {}) {
+            console.log(`[State Change Request] ${currentState} -> ${state}`, data);
 
-        // ============================================
-        // UI State Management
-        // ============================================
+            // Prevent redundant state changes or invalid transitions
+            if (currentState === state) return;
 
-        function showState(state) {
-            stateLoading.classList.toggle('state-hidden', state !== 'loading');
-            stateSuccess.classList.toggle('state-hidden', state !== 'success');
-            stateError.classList.toggle('state-hidden', state !== 'error');
-
-            // Update document title
+            // If switching to success, cancel any pending error display immediately
             if (state === 'success') {
-                document.title = `驗證成功 - ${CONFIG.appName}`;
-            } else if (state === 'error') {
-                document.title = `驗證失敗 - ${CONFIG.appName}`;
-            }
-        }
-
-        function showError(message, detail = null) {
-            errorMessage.textContent = message;
-            if (detail) {
-                errorDetailText.textContent = detail;
-                errorDetail.classList.remove('state-hidden');
-            } else {
-                errorDetail.classList.add('state-hidden');
-            }
-            showState('error');
-        }
-
-        function showSuccess() {
-            showState('success');
-            checkLiffAndSetupClose();
-        }
-
-        // ============================================
-        // LIFF Close Behavior
-        // ============================================
-
-        async function checkLiffAndSetupClose() {
-            const liffCheckTimeout = 1500; // 1.5 seconds max wait
-
-            try {
-                if (liffInitPromise) {
-                    await Promise.race([
-                        liffInitPromise,
-                        new Promise(resolve => setTimeout(() => resolve(false), liffCheckTimeout))
-                    ]);
+                if (errorTimer) {
+                    clearTimeout(errorTimer);
+                    errorTimer = null;
+                    console.log("[Debounce] Pending error state cancelled by success");
                 }
-            } catch (e) {
-                console.warn('LIFF check error (ignored):', e.message);
+                applyStateChange(state, data);
             }
-
-            // Check if LIFF is ready and we're in LINE client
-            const canAutoClose = isLiffReady &&
-                                 typeof liff !== 'undefined' &&
-                                 typeof liff.isInClient === 'function' &&
-                                 liff.isInClient();
-
-            if (canAutoClose) {
-                // LIFF is ready - auto close after delay
-                successHint.textContent = '視窗即將自動關閉...';
-                successHint.classList.remove('state-hidden');
-                closeBtn.classList.add('state-hidden');
-
-                setTimeout(() => {
-                    closeWindow();
-                }, CONFIG.closeDelayMs);
-            } else {
-                // LIFF not available - show manual close button
-                successHint.textContent = '驗證已完成';
-                closeBtn.classList.remove('state-hidden');
+            // If switching to error, debounce it to prevent flicker
+            else if (state === 'error') {
+                if (errorTimer) clearTimeout(errorTimer);
+                console.log("[Debounce] Error state queued...");
+                errorTimer = setTimeout(() => {
+                    applyStateChange(state, data);
+                    errorTimer = null;
+                }, 500); // 500ms delay to allow success to override
+            }
+            // For other states (loading), apply immediately
+            else {
+                applyStateChange(state, data);
             }
         }
 
-        function closeWindow() {
-            try {
-                if (isLiffReady && typeof liff !== 'undefined' && liff.isInClient && liff.isInClient()) {
-                    liff.closeWindow();
-                } else {
-                    window.close();
-                }
-            } catch (e) {
-                console.warn('Close window error:', e);
-                window.close();
-            }
-        }
+        function applyStateChange(state, data) {
+            console.log(`[State Applied] ${currentState} -> ${state}`);
+            currentState = state;
 
-        // ============================================
-        // Token Extraction
-        // ============================================
-
-        function getTokenFromUrl() {
-            const urlParams = new URLSearchParams(window.location.search);
-            return urlParams.get('token');
-        }
-
-        function getAppFromUrl() {
-            const urlParams = new URLSearchParams(window.location.search);
-            return urlParams.get('app') || CONFIG.appContext;
-        }
-
-        // ============================================
-        // API Communication
-        // ============================================
-
-        async function verifyToken(token) {
-            const response = await fetch(CONFIG.apiEndpoint, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                },
-                body: JSON.stringify({ token: token })
+            // Hide all
+            Object.values(views).forEach(el => {
+                el.classList.add('hidden-force');
+                el.style.display = 'none'; // Force hide with inline style
+                el.style.setProperty('display', 'none', 'important');
             });
 
-            const data = await response.json();
-
-            if (!response.ok) {
-                const error = new Error(data.detail || data.message || `HTTP ${response.status}`);
-                error.httpStatus = response.status;
-                throw error;
+            // Show target
+            if (views[state]) {
+                views[state].classList.remove('hidden-force');
+                views[state].style.display = ''; // Remove inline display:none
+                views[state].style.removeProperty('display');
             }
 
-            return data;
-        }
-
-        // ============================================
-        // LIFF Initialization (Background)
-        // ============================================
-
-        async function initializeLiffBackground() {
-            try {
-                const liffId = CONFIG.liffId;
-
-                if (!liffId || liffId === '{{LIFF_ID}}') {
-                    console.info('LIFF ID not configured, auto-close will be unavailable');
-                    isLiffReady = false;
-                    return;
-                }
-
-                await liff.init({ liffId });
-                isLiffReady = true;
-                console.info('LIFF initialized successfully (background)');
-            } catch (error) {
-                // LIFF error is a SOFT ERROR - never affects UI
-                isLiffReady = false;
-                console.info('LIFF init failed (soft error, ignored):', error.message);
+            // Specific Logic
+            if (state === 'success') {
+                startAutoClose();
+                document.title = '驗證成功';
+            } else if (state === 'error') {
+                els.errorMsg.textContent = data.msg || '發生未知錯誤';
+                els.errorDetail.textContent = data.detail || 'CODE: UNKNOWN';
+                document.title = '驗證失敗';
             }
         }
 
-        // ============================================
-        // Error Parsing
-        // ============================================
-
-        function parseVerificationError(error) {
-            let userMessage = '驗證過程發生錯誤，請重試';
-            let technicalDetail = error.message;
-
-            const msg = (error.message || '').toLowerCase();
-
-            if (msg.includes('expired') || msg.includes('過期')) {
-                userMessage = '驗證連結已過期';
-                technicalDetail = '請重新申請驗證';
-            } else if (msg.includes('invalid') || msg.includes('not found') || msg.includes('已使用') || msg.includes('used')) {
-                userMessage = '驗證連結無效';
-                technicalDetail = '連結可能已被使用或不存在';
-            } else if (msg.includes('fetch') || msg.includes('network') || msg.includes('failed to fetch')) {
-                userMessage = '網路連線錯誤';
-                technicalDetail = '請檢查網路連線後重試';
-            } else if (error.httpStatus >= 500) {
-                userMessage = '伺服器暫時無法處理請求';
-                technicalDetail = '請稍後再試';
-            }
-
-            return { userMessage, technicalDetail };
-        }
-
-        // ============================================
-        // Main Entry Point
-        // ============================================
+        // ==========================================
+        // Core Logic
+        // ==========================================
 
         async function main() {
-            // ========== Execution Guard ==========
+            // Safety Guard: Prevent double execution
             if (window.hasRun) {
-                console.warn('Duplicate main() call blocked');
+                console.warn("[Guard] Main already ran");
                 return;
             }
             window.hasRun = true;
 
-            // ========== Initialize DOM Elements ==========
-            initDomElements();
-
-            // ========== Ensure Loading State ==========
-            showState('loading');
-
-            // ========== Step 1: Extract Token SYNCHRONOUSLY ==========
-            const token = getTokenFromUrl();
-            console.info('Token extracted:', token ? 'present' : 'missing');
-
-            // ========== Step 2: Validate Token Exists ==========
-            if (!token) {
-                showError('驗證連結無效', '缺少驗證碼參數');
-                return;
-            }
-
-            // ========== Step 3: Start LIFF in Background ==========
-            liffInitPromise = initializeLiffBackground();
-
-            // ========== Step 4: Execute API Verification ==========
             try {
-                await verifyToken(token);
-                showSuccess();
-            } catch (error) {
-                console.error('Verification API error:', error);
-                const { userMessage, technicalDetail } = parseVerificationError(error);
-                showError(userMessage, technicalDetail);
+                // 1. Initialize LIFF (Parallel, Non-blocking)
+                initLiff();
+
+                // 2. Get Token (Try URL param first, then server injection)
+                const urlParams = new URLSearchParams(window.location.search);
+                let token = urlParams.get('token');
+
+                // Fallback to server-side injected token (if not empty/placeholder)
+                if (!token && CONFIG.serverToken && !CONFIG.serverToken.includes("{{")) {
+                    console.log("Using server-injected token");
+                    token = CONFIG.serverToken;
+                }
+
+                if (!token) {
+                    throw { msg: "連結無效", detail: "Missing 'token' parameter" };
+                }
+
+                // 3. Call API
+                const result = await callVerifyApi(token);
+
+                // 4. Handle Result
+                if (result.success) {
+                    switchState('success');
+                } else {
+                    throw { msg: "驗證失敗", detail: result.message || "API returned false" };
+                }
+
+            } catch (err) {
+                console.error("Verification Critical Error:", err);
+                const msg = err.msg || "系統發生錯誤";
+                const detail = err.detail || err.message || JSON.stringify(err);
+
+                // Pretty print specific errors
+                let userMsg = msg;
+                if (detail.includes("expired")) userMsg = "驗證連結已過期";
+                if (detail.includes("not found")) userMsg = "無效的驗證碼";
+                if (detail.includes("used")) userMsg = "此連結已被使用";
+
+                switchState('error', { msg: userMsg, detail: detail });
             }
         }
 
-        // ============================================
-        // Bootstrap
-        // ============================================
+        async function callVerifyApi(token) {
+            const res = await fetch(CONFIG.apiEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: token })
+            });
 
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', main, { once: true });
-        } else {
-            main();
+            const data = await res.json();
+
+            if (!res.ok) {
+                throw {
+                    msg: data.message || "伺服器錯誤",
+                    detail: data.detail || `HTTP ${res.status}`
+                };
+            }
+            // For VerifyTokenResponse
+            return data;
         }
-    </script>
 
+        // ==========================================
+        // Helper / Side Effects
+        // ==========================================
+
+        function startAutoClose() {
+            let timeLeft = 3;
+
+            const timer = setInterval(() => {
+                timeLeft -= 1;
+                if (els.countdown) els.countdown.textContent = timeLeft;
+
+                if (timeLeft <= 0) {
+                    clearInterval(timer);
+                    closeWindow();
+                }
+            }, 1000);
+        }
+
+        function closeWindow() {
+            if (liff && liff.isInClient()) {
+                liff.closeWindow();
+            } else {
+                window.close();
+                // Fallback for browsers preventing window.close()
+                document.body.innerHTML = `
+                    <div style="display:flex;height:100vh;align-items:center;justify-content:center;background:#f0fdf4;color:#166534;font-family:sans-serif;">
+                        <div style="text-align:center;">
+                            <h1 style="font-size:24px;margin-bottom:10px;">您可以關閉此頁面了</h1>
+                            <p>You can close this tab now.</p>
+                        </div>
+                    </div>`;
+            }
+        }
+
+        async function initLiff() {
+            if (!CONFIG.liffId || CONFIG.liffId.includes("{{")) return;
+            try {
+                await liff.init({ liffId: CONFIG.liffId });
+                console.log("LIFF initialized");
+            } catch (e) {
+                console.warn("LIFF Init failed (Non-fatal):", e);
+            }
+        }
+
+        // Boot
+        window.onload = main;
+
+    </script>
 </body>
 
 </html>
