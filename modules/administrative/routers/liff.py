@@ -7,8 +7,8 @@ Serves LIFF HTML pages for LINE integration.
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi import APIRouter
+from fastapi.responses import FileResponse, HTMLResponse
 
 from modules.administrative.core.config import get_admin_settings
 
@@ -79,31 +79,8 @@ async def serve_leave_form_js() -> FileResponse:
     return response
 
 
-@router.get(
-    "/verify-redirect",
-    response_class=HTMLResponse,
-    summary="Email Verification Redirect",
-    description="Serve the LIFF verification redirect page for email deep linking.",
-)
-async def serve_verify_redirect(request: Request) -> RedirectResponse:
-    """
-    Serve the LIFF email verification redirect page.
-
-    This page handles email verification tokens via LIFF deep linking,
-    providing a seamless mobile-native experience.
-
-    LIFF Endpoint should be set to:
-    https://your-domain.com/api/administrative/liff/verify-redirect
-    """
-    import time
-    # Redirect to the unified framework auth page
-    # This prevents code duplication and ensures consistent UI/UX
-    query_params = request.query_params
-    timestamp = int(time.time())
-    return RedirectResponse(
-        url=f"/auth/page/verify-result?{query_params}&t={timestamp}",
-        status_code=302
-    )
+# NOTE: serve_verify_redirect endpoint has been removed.
+# All authentication flows are now handled by Core framework at /auth/page/*
 
 
 @router.get(

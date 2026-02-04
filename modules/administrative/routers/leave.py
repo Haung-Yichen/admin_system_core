@@ -22,7 +22,6 @@ from core.line_auth import (
     get_verified_user,
     VerifiedUser,
     AUTH_ERROR_MESSAGES,
-    AccountNotBoundResponse,
 )
 from core.services import (
     AuthService,
@@ -128,13 +127,14 @@ async def get_current_user_email(
         binding_status = await auth_service.check_binding_status(id_token, db)
 
         if not binding_status["is_bound"]:
-            # 使用框架統一的錯誤回應格式
+            # 帳號未綁定 - 回傳 403 並指示前端導向 Core 登入頁
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=AccountNotBoundResponse.create(
-                    line_sub=binding_status["sub"],
-                    line_name=binding_status.get("line_name"),
-                ),
+                detail={
+                    "code": "ACCOUNT_NOT_BOUND",
+                    "message": "您的 LINE 帳號尚未綁定公司信箱，請先完成綁定。",
+                    "redirect_url": "/auth/page/login?app=administrative"
+                },
             )
 
         return binding_status["email"]
@@ -354,13 +354,14 @@ async def post_leave_init(
             binding_status = await auth_service.check_binding_status(id_token, db)
             
             if not binding_status["is_bound"]:
-                # 使用框架統一的錯誤回應格式
+                # 帳號未綁定 - 回傳 403 並指示前端導向 Core 登入頁
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail=AccountNotBoundResponse.create(
-                        line_sub=binding_status["sub"],
-                        line_name=binding_status.get("line_name"),
-                    ),
+                    detail={
+                        "code": "ACCOUNT_NOT_BOUND",
+                        "message": "您的 LINE 帳號尚未綁定公司信箱，請先完成綁定。",
+                        "redirect_url": "/auth/page/login?app=administrative"
+                    },
                 )
             
             email = binding_status["email"]

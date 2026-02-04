@@ -1,5 +1,6 @@
 // leave_form.js - External JS file for LIFF Leave Request Form
 // This file MUST be loaded externally to bypass CSP inline script blocks
+// NOTE: Account binding flows are handled by Core framework at /auth/page/login?app=administrative
 
 (function () {
     'use strict';
@@ -12,7 +13,6 @@
     let userId = null;
     let userProfile = null;
     let idToken = null;
-    let lineSub = null;
 
     // Debug logging
     const debugLogs = [];
@@ -461,11 +461,11 @@
 
                 debugLog('API Error: ' + JSON.stringify(errorDetail), true);
 
-                // Handle 403 - Account not bound
-                if (response.status === 403 && errorData && errorData.detail && errorData.detail.error === 'account_not_bound') {
-                    debugLog('Account not bound, showing binding UI');
-                    lineSub = errorData.detail.line_sub;
-                    showBindingUI(errorData.detail.line_name);
+                // Handle 403 - Account not bound: redirect to Core login page
+                if (response.status === 403 && errorData && errorData.detail && errorData.detail.code === 'ACCOUNT_NOT_BOUND') {
+                    debugLog('Account not bound, redirecting to Core login page');
+                    const redirectUrl = errorData.detail.redirect_url || '/auth/page/login?app=administrative';
+                    window.location.href = redirectUrl;
                     return;
                 }
 
@@ -659,7 +659,9 @@
     function showError(message) {
         document.getElementById('loading-container').style.display = 'none';
         document.getElementById('error-container').style.display = 'flex';
-        document.getElementById('binding-container').style.display = 'none';
+        // NOTE: binding-container is no longer used - binding is handled by Core framework
+        const bindingEl = document.getElementById('binding-container');
+        if (bindingEl) bindingEl.style.display = 'none';
 
         let userMessage = message;
         if (message.includes('超時') || message.includes('timeout')) {
@@ -673,80 +675,9 @@
         document.getElementById('submit-section').classList.add('hidden');
     }
 
-    function showBindingUI(lineName) {
-        document.getElementById('loading-container').style.display = 'none';
-        document.getElementById('error-container').style.display = 'none';
-        document.getElementById('binding-container').style.display = 'flex';
-        document.getElementById('success-container').style.display = 'none';
-        document.getElementById('form-container').classList.remove('active');
-        document.getElementById('submit-section').classList.add('hidden');
-
-        if (lineName) {
-            document.querySelector('#binding-container .error-message').innerHTML =
-                `您好 <strong>${lineName}</strong>！<br>您的 LINE 帳號尚未綁定公司信箱，<br>請輸入公司 Email 完成綁定。`;
-        }
-    }
-
-    // Make sendBindingEmail globally available
-    window.sendBindingEmail = async function () {
-        const emailInput = document.getElementById('binding-email');
-        const bindingBtn = document.getElementById('binding-btn');
-        const statusEl = document.getElementById('binding-status');
-        const email = emailInput.value.trim();
-
-        if (!email) {
-            alert('請輸入公司 Email');
-            return;
-        }
-
-        if (!lineSub) {
-            alert('無法取得 LINE 識別碼，請重新整理頁面');
-            return;
-        }
-
-        bindingBtn.disabled = true;
-        bindingBtn.innerHTML = '<span class="spinner" style="width:20px;height:20px;border-width:2px;"></span><span>發送中...</span>';
-        statusEl.style.display = 'none';
-
-        try {
-            debugLog(`Sending binding request for email: ${email}`);
-
-            const response = await fetchWithTimeout(
-                `${API_BASE_URL}/api/auth/magic-link`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        email: email,
-                        line_sub: lineSub
-                    })
-                }
-            );
-
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail || error.message || '發送失敗');
-            }
-
-            const result = await response.json();
-            debugLog('Binding email sent successfully');
-
-            statusEl.style.display = 'block';
-            statusEl.style.color = 'var(--accent)';
-            statusEl.innerHTML = `✅ 驗證信已發送至 <strong>${email}</strong><br>請查收並點擊信中的連結完成綁定。<br>綁定完成後請重新開啟此頁面。`;
-
-            bindingBtn.innerHTML = '<span>✅</span><span>已發送</span>';
-
-        } catch (error) {
-            debugLog('Binding error: ' + error.message, true);
-            statusEl.style.display = 'block';
-            statusEl.style.color = 'var(--danger)';
-            statusEl.textContent = '❌ ' + error.message;
-
-            bindingBtn.disabled = false;
-            bindingBtn.innerHTML = '<span>📧</span><span>重新發送</span>';
-        }
-    };
+    // NOTE: showBindingUI and sendBindingEmail have been removed.
+    // All account binding flows are now handled by Core framework at /auth/page/login?app=administrative
+    // When user is not bound, they are redirected to the Core login page automatically.
 
     function showForm() {
         document.getElementById('loading-container').style.display = 'none';
