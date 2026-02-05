@@ -237,9 +237,19 @@
         // ============================================
 
         async function initializeLiff() {
+            console.log('Using LIFF ID:', CONFIG.liffId);
+            console.log('App Context:', CONFIG.appContext);
+
             // Validate LIFF ID
             if (!CONFIG.liffId || CONFIG.liffId === '{{LIFF_ID}}') {
                 showInitError('LIFF ID 未設定，請聯繫管理員');
+                return;
+            }
+
+            // Check if LIFF SDK is loaded
+            if (typeof liff === 'undefined') {
+                showInitError('無法載入 LINE SDK，請嘗試關閉廣告阻擋器 (AdBlock) 或更換瀏覽器');
+                console.error('LIFF SDK not loaded (likely blocked by client)');
                 return;
             }
 

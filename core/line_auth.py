@@ -93,7 +93,10 @@ class LineAuthMessages:
     """
 
     @staticmethod
-    def get_verification_required_flex(line_user_id: str) -> dict[str, Any]:
+    def get_verification_required_flex(
+        line_user_id: str,
+        app_context: str | None = None,
+    ) -> dict[str, Any]:
         """
         Create a Flex Message prompting user to verify their identity.
 
@@ -102,6 +105,8 @@ class LineAuthMessages:
 
         Args:
             line_user_id: LINE user ID for constructing the login URL.
+            app_context: App context for LIFF ID injection (e.g., 'administrative', 'chatbot').
+                        If None, no app parameter is added to the URL.
 
         Returns:
             Flex Message bubble content (not wrapped in flex message object).
@@ -112,6 +117,8 @@ class LineAuthMessages:
         app_name = config_loader.get("server.app_name", "Admin System")
         # Use Template-based route for correct LIFF ID injection
         login_url = f"{base_url}/auth/page/login?line_sub={line_user_id}"
+        if app_context:
+            login_url += f"&app={app_context}"
 
         return {
             "type": "bubble",
@@ -165,7 +172,10 @@ class LineAuthMessages:
         }
 
     @staticmethod
-    def get_verification_required_messages(line_user_id: str) -> list[dict[str, Any]]:
+    def get_verification_required_messages(
+        line_user_id: str,
+        app_context: str | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Get complete LINE message objects for verification required response.
 
@@ -173,11 +183,14 @@ class LineAuthMessages:
 
         Args:
             line_user_id: LINE user ID for constructing the login URL.
+            app_context: App context for LIFF ID injection (e.g., 'administrative', 'chatbot').
 
         Returns:
             List of LINE message objects.
         """
-        flex_content = LineAuthMessages.get_verification_required_flex(line_user_id)
+        flex_content = LineAuthMessages.get_verification_required_flex(
+            line_user_id, app_context
+        )
         return [
             {
                 "type": "flex",
@@ -195,6 +208,7 @@ async def line_auth_check(
     line_user_id: str,
     db: AsyncSession,
     auth_service: AuthService | None = None,
+    app_context: str | None = None,
 ) -> tuple[bool, list[dict[str, Any]] | None]:
     """
     Check if a LINE user is authenticated (bound to company email).
@@ -206,6 +220,7 @@ async def line_auth_check(
         line_user_id: LINE user ID from webhook event source.
         db: Database session.
         auth_service: Optional auth service instance (uses singleton if not provided).
+        app_context: App context for LIFF ID injection (e.g., 'administrative', 'chatbot').
 
     Returns:
         Tuple of (is_authenticated, messages_if_not_auth).
@@ -213,7 +228,7 @@ async def line_auth_check(
         - If not authenticated: (False, [verification_messages])
 
     Example:
-        is_auth, response = await line_auth_check(user_id, db)
+        is_auth, response = await line_auth_check(user_id, db, app_context="chatbot")
         if not is_auth:
             await line_service.reply(reply_token, response)
             return
@@ -227,7 +242,9 @@ async def line_auth_check(
     if is_bound:
         return True, None
     else:
-        messages = LineAuthMessages.get_verification_required_messages(line_user_id)
+        messages = LineAuthMessages.get_verification_required_messages(
+            line_user_id, app_context
+        )
         return False, messages
 
 

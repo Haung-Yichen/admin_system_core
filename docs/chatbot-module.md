@@ -23,8 +23,7 @@ modules/chatbot/
 ├── chatbot_module.py        # IAppModule 實作
 ├── core/
 │   ├── __init__.py
-│   ├── config.py            # 模組配置 (SOP_BOT_ 環境變數)
-│   └── rate_limiter.py      # API 速率限制
+│   └── config.py            # 模組配置 (SOP_BOT_ 環境變數)
 ├── models/
 │   ├── __init__.py
 │   └── models.py            # ORM 模型 (SOPDocument) - *User 已移至 Core*

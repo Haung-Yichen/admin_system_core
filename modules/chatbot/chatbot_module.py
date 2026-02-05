@@ -237,7 +237,7 @@ class ChatbotModule(IAppModule):
         line_service = get_line_service()
 
         async with get_thread_local_session() as db:
-            is_auth, auth_messages = await line_auth_check(user_id, db)
+            is_auth, auth_messages = await line_auth_check(user_id, db, app_context="chatbot")
 
         if is_auth:
             await line_service.reply(reply_token, [
@@ -268,7 +268,7 @@ class ChatbotModule(IAppModule):
 
         async with get_thread_local_session() as db:
             # 使用框架統一的驗證機制
-            is_auth, auth_messages = await line_auth_check(user_id, db)
+            is_auth, auth_messages = await line_auth_check(user_id, db, app_context="chatbot")
 
             if not is_auth:
                 await line_service.reply(reply_token, auth_messages)
@@ -329,10 +329,8 @@ class ChatbotModule(IAppModule):
 
         Exposes:
         - Embedding model status
-        - Rate limiter statistics
         - Ragic sync status
         """
-        from modules.chatbot.core.rate_limiter import magic_link_limiter
         from modules.chatbot.services.vector_service import get_vector_service
 
         status = "active"
@@ -353,14 +351,6 @@ class ChatbotModule(IAppModule):
             details["Vector Service"] = "Error"
             logger.error(f"Error getting vector service status: {e}")
             status = "error"
-
-        # 2. Check Rate Limiter Stats
-        try:
-            # simplistic count of tracked IPs
-            tracked_count = len(magic_link_limiter._requests)
-            details["Active IPs"] = str(tracked_count)
-        except Exception:
-            details["Rate Limiter"] = "Unavailable"
 
         # 3. DB Stats (from background updater)
         if hasattr(self, "_stats"):

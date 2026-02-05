@@ -60,6 +60,7 @@ def _get_liff_id_map() -> dict[str, str]:
     return {
         # Default/Admin app - uses legacy env var for backward compatibility
         "admin": os.getenv("ADMIN_LIFF_ID") or os.getenv("ADMIN_LINE_LIFF_ID_VERIFY", ""),
+        "administrative": os.getenv("ADMIN_LIFF_ID") or os.getenv("ADMIN_LINE_LIFF_ID_VERIFY", ""),
         # Chatbot module
         "chatbot": os.getenv("CHATBOT_LIFF_ID", ""),
         # HR module (future)
@@ -308,6 +309,8 @@ async def get_login_page(
     config = _get_app_config()
     app_context = app or "default"
     liff_id = _get_liff_id_for_app(app_context)
+    
+    logger.info(f"Login page requested for app: {app_context}, LIFF ID: {liff_id}")
     
     if not liff_id:
         logger.warning(f"No LIFF ID configured for app context: {app_context}")

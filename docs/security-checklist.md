@@ -15,12 +15,7 @@
 - [x] Permissions-Policy: 禁用不必要的瀏覽器功能
 - [x] Strict-Transport-Security (HSTS)
 
-### 3. Rate Limiting (core/middleware/rate_limit.py)
-- [x] 全局 IP 速率限制
-- [x] 敏感端點更嚴格的限制 (/auth/, /admin/auth/, /webhook/)
-- [x] 支援 Cloudflare CF-Connecting-IP 標頭
-
-### 4. Debug 模式
+### 3. Debug 模式
 - [x] 生產環境 APP_DEBUG=false
 - [x] DEBUG_SKIP_AUTH 只在 localhost 生效
 

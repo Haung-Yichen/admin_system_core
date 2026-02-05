@@ -93,6 +93,39 @@ class TestLineAuthMessages:
         assert "altText" in result[0]
         assert "contents" in result[0]
 
+    def test_get_verification_required_flex_with_app_context(self, mock_env_vars):
+        """Test that app context is correctly added to login URL."""
+        from core.line_auth import LineAuthMessages
+
+        user_id = "Utest123456"
+        app_context = "administrative"
+        result = LineAuthMessages.get_verification_required_flex(user_id, app_context)
+
+        # Find the button and check its action URI
+        footer_contents = result["footer"]["contents"]
+        button = next(c for c in footer_contents if c.get("type") == "button")
+
+        assert user_id in button["action"]["uri"]
+        assert "/auth/page/login" in button["action"]["uri"]
+        assert f"app={app_context}" in button["action"]["uri"]
+
+    def test_get_verification_required_messages_with_app_context(self, mock_env_vars):
+        """Test that messages helper passes app context correctly."""
+        from core.line_auth import LineAuthMessages
+
+        user_id = "Utest123456"
+        app_context = "chatbot"
+        messages = LineAuthMessages.get_verification_required_messages(user_id, app_context)
+
+        assert len(messages) == 1
+        assert messages[0]["type"] == "flex"
+        
+        # Check the nested flex content has the app context in URL
+        flex_content = messages[0]["contents"]
+        footer_contents = flex_content["footer"]["contents"]
+        button = next(c for c in footer_contents if c.get("type") == "button")
+        assert f"app={app_context}" in button["action"]["uri"]
+
 
 # =============================================================================
 # Test line_auth_check (Webhook Helper)

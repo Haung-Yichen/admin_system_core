@@ -15,7 +15,6 @@ from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.app_context import AppContext
-from core.middleware import RateLimitMiddleware, RateLimitConfig
 
 if TYPE_CHECKING:
     from core.registry import ModuleRegistry
@@ -89,12 +88,6 @@ def create_base_app(
         if request.url.scheme == "https":
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
-
-    # Add rate limiting middleware (before other middleware)
-    # Note: In production with Cloudflare, you may also configure rate limiting at Cloudflare level
-    if not config.get("app.debug", False):
-        app.add_middleware(RateLimitMiddleware, config=RateLimitConfig())
-        _logger.info("Rate limiting middleware enabled")
 
     # Register core routes
     _register_core_routes(app)

@@ -344,6 +344,15 @@ class AdminSettings(BaseSettings):
         ),
     ] = ""
 
+    line_liff_id_verify: Annotated[
+        str,
+        Field(
+            default="",
+            description="LIFF ID for identity verification (login page)",
+            validation_alias="ADMIN_LINE_LIFF_ID_VERIFY",
+        ),
+    ] = ""
+
     # === Ragic URLs (loaded from RagicRegistry) ===
     @property
     def ragic_url_account(self) -> str:
