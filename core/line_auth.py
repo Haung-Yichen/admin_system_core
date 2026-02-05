@@ -110,7 +110,8 @@ class LineAuthMessages:
         config_loader.load()
         base_url = config_loader.get("server.base_url", "")
         app_name = config_loader.get("server.app_name", "Admin System")
-        login_url = f"{base_url}/auth/login?line_sub={line_user_id}"
+        # Use Template-based route for correct LIFF ID injection
+        login_url = f"{base_url}/auth/page/login?line_sub={line_user_id}"
 
         return {
             "type": "bubble",

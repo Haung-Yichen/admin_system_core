@@ -6,6 +6,9 @@ The actual webhook handling is now done by the framework at /webhook/line/{modul
 
 Note: The webhook endpoint has been moved to the framework layer (core/server.py).
       This file now only contains reusable message templates.
+
+Note: Authentication Flex Messages are now handled by core.line_auth.LineAuthMessages.
+      The create_auth_required_flex function has been removed to avoid duplication.
 """
 
 from typing import Any
@@ -42,49 +45,9 @@ def _extract_urls(text: str) -> list[str]:
     return list(set(cleaned_urls))  # Remove duplicates
 
 
-def create_auth_required_flex(line_user_id: str) -> dict[str, Any]:
-    """
-    Create a Flex Message bubble prompting user to authenticate.
-
-    Args:
-        line_user_id: LINE user ID for constructing the login URL.
-
-    Returns:
-        Flex Message bubble content.
-
-    Note:
-        This function creates a legacy login URL using the Messaging API userId.
-        For LIFF-based auth, the frontend should use LINE ID Token's `sub` claim instead.
-    """
-    from core.app_context import ConfigLoader
-    config_loader = ConfigLoader()
-    config_loader.load()
-    base_url = config_loader.get("server.base_url", "")
-    
-    # Check if base_url is set, log warning if not
-    if not base_url:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.warning("BASE_URL not set in configuration! Auth links will be relative and may not work in LINE.")
-
-    login_url = f"{base_url}/auth/login?line_sub={line_user_id}"
-
-    return {
-        "type": "bubble",
-        "hero": {"type": "image", "url": f"{base_url}/static/crown.png?v=2",
-            "size": "full", "aspectRatio": "20:13", "aspectMode": "fit",
-            "backgroundColor": "#FFFFFF"},
-        "body": {"type": "box", "layout": "vertical", "contents": [
-            {"type": "text", "text": "身份驗證", "weight": "bold",
-                "size": "xl", "align": "center"},
-            {"type": "text", "text": "請先驗證您的員工身份才能使用 SOP 查詢服務。",
-                "wrap": True, "size": "sm", "margin": "lg"}
-        ], "paddingAll": "20px"},
-        "footer": {"type": "box", "layout": "vertical", "contents": [
-            {"type": "button", "action": {"type": "uri", "label": "📧 驗證身份",
-                                          "uri": login_url}, "style": "primary", "color": "#00B900"}
-        ], "paddingAll": "15px"},
-    }
+# NOTE: create_auth_required_flex has been removed.
+# All modules should use core.line_auth.LineAuthMessages.get_verification_required_flex()
+# or core.line_auth.line_auth_check() for authentication prompts.
 
 
 def create_sop_result_flex(

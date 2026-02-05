@@ -277,15 +277,16 @@ def create_auth_required_flex(line_user_id: str) -> dict[str, Any]:
         Flex Message bubble content.
 
     Note:
-        This function creates a legacy login URL using the Messaging API userId.
-        For LIFF-based auth, the frontend should use LINE ID Token's `sub` claim instead.
+        Uses the Framework-First login page with app context parameter
+        to ensure correct LIFF ID injection for automatic window closing.
     """
     from core.app_context import ConfigLoader
 
     config_loader = ConfigLoader()
     config_loader.load()
     base_url = config_loader.get("server.base_url", "")
-    login_url = f"{base_url}/auth/login?line_sub={line_user_id}"
+    # Use Template-based route with app parameter for correct LIFF ID injection
+    login_url = f"{base_url}/auth/page/login?line_sub={line_user_id}&app=administrative"
 
     return {
         "type": "bubble",

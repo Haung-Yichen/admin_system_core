@@ -60,7 +60,7 @@ class TestLineAuthMessages:
 
         # Check body contains required text
         body_contents = result["body"]["contents"]
-        assert any(c.get("text") == "身份驗證" for c in body_contents)
+        assert any(c.get("text") == "員工身份驗證" for c in body_contents)
 
         # Check footer has a button
         footer_contents = result["footer"]["contents"]
@@ -78,7 +78,8 @@ class TestLineAuthMessages:
         button = next(c for c in footer_contents if c.get("type") == "button")
 
         assert user_id in button["action"]["uri"]
-        assert "/auth/login" in button["action"]["uri"]
+        # Updated to use template-based route
+        assert "/auth/page/login" in button["action"]["uri"]
 
     def test_get_verification_required_messages_returns_list(self, mock_env_vars):
         """Test that get_verification_required_messages returns message list."""
