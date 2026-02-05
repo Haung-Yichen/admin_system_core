@@ -263,6 +263,19 @@ class MyModule(IAppModule):
 
 ---
 
+### 8. 前端開發 (Front-End Development)
+
+若模組包含前端頁面（如 LIFF 表單），請遵循以下規範以確保體驗一致性：
+
+*   **HTML 模板**: 位於模組的 `static/` 目錄下 (建議使用 `jinja2` 渲染)。
+*   **樣式規範**: 為了確保視覺一致性，**必須** 遵循 [Frontend Design Guidelines](frontend-style-guide.md)。
+*   **技術限制**: 避免引入過多外部相依 (如 Bootstrap/Tailwind)，請直接使用規範中定義的 CSS Variables。
+*   **LIFF 整合**:
+    *   頁面載入時應初始化 `liff` SDK。
+    *   使用框架提供的 `/auth/login` 進行身分驗證，不要自行實作登入頁。
+
+---
+
 ## 常見問題 (FAQ)
 
 **Q: 如何新增資料庫 Table？**

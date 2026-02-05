@@ -231,3 +231,14 @@ Module.on_entry()
 4.  **背景執行緒**: 資料同步應在背景執行緒執行，使用獨立的 Event Loop，避免阻塞主應用程式啟動。
 
 ---
+
+## 8. 前端架構 (Frontend Architecture)
+
+系統採取輕量化、原生優先的前端策略，特別針對 LINE In-App Browser (LIFF) 進行最佳化。
+
+*   **設計規範**: 詳細樣式與元件規範請參考 [Frontend Design Guidelines](frontend-style-guide.md)。
+*   **技術選擇**:
+    *   **No Build Tool**: 為了簡化部署與維護，HTML/JS 直接由後端 Jinja2 渲染或作為靜態文件提供，不使用 Webpack/Vite 打包。
+    *   **Vanilla CSS**: 使用 CSS Variables 實現主題化，不依賴龐大的 CSS Framework (如 Bootstrap/Tailwind)。
+*   **LIFF 整合**: 所有前端頁面皆預設包含 `liff-sdk` 初始化邏輯，以支援自動登入與身分識別。
+

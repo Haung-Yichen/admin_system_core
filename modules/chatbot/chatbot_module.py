@@ -231,7 +231,7 @@ class ChatbotModule(IAppModule):
             return
 
         from core.database.session import get_thread_local_session
-        from core.line_auth import line_auth_check, LineAuthMessages
+        from core.line_auth import line_auth_check
         from modules.chatbot.services import get_line_service
 
         line_service = get_line_service()
@@ -244,9 +244,8 @@ class ChatbotModule(IAppModule):
                 {"type": "text", "text": "👋 歡迎回來！您可以直接輸入問題查詢 SOP。"}
             ])
         else:
-            # 使用框架統一的驗證訊息
-            welcome_msg = {"type": "text", "text": "👋 歡迎使用 HSIB SOP Bot！"}
-            await line_service.reply(reply_token, [welcome_msg] + auth_messages)
+            # 僅發送驗證按鈕，不發送額外歡迎訊息
+            await line_service.reply(reply_token, auth_messages)
 
     async def _handle_text_message(
         self, user_id: str, text: str, reply_token: str | None

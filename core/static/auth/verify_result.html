@@ -280,13 +280,21 @@
                 // 1. Initialize LIFF (Parallel, Non-blocking)
                 initLiff();
 
-                // 2. Get Token (Try URL param first, then server injection)
+                // 2. Get Token - Handle LIFF's liff.state wrapping
                 const urlParams = new URLSearchParams(window.location.search);
                 let token = urlParams.get('token');
 
+                // LIFF wraps query params in liff.state - parse it!
+                if (!token) {
+                    const liffState = urlParams.get('liff.state');
+                    if (liffState) {
+                        const stateParams = new URLSearchParams(liffState);
+                        token = stateParams.get('token');
+                    }
+                }
+
                 // Fallback to server-side injected token (if not empty/placeholder)
                 if (!token && CONFIG.serverToken && !CONFIG.serverToken.includes("{{")) {
-                    console.log("Using server-injected token");
                     token = CONFIG.serverToken;
                 }
 
