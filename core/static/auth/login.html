@@ -241,7 +241,11 @@
             console.log('App Context:', CONFIG.appContext);
 
             // Validate LIFF ID
-            if (!CONFIG.liffId || CONFIG.liffId === '{{LIFF_ID}}') {
+            // Check for empty, or contains placeholder markers ({{ or }})
+            const liffId = CONFIG.liffId ? CONFIG.liffId.trim() : '';
+            const isPlaceholder = liffId.includes('{{') || liffId.includes('}}');
+            
+            if (!liffId || isPlaceholder) {
                 showInitError('LIFF ID 未設定，請聯繫管理員');
                 return;
             }

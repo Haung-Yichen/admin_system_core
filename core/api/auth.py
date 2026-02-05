@@ -15,14 +15,14 @@ import os
 from pathlib import Path
 from typing import Annotated
 
+from dotenv import load_dotenv  # 新增：確保 .env 被載入
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.app_context import ConfigLoader
 from core.database import get_db_session
 from core.schemas.auth import (
-    ErrorResponse,
     MagicLinkRequest,
     MagicLinkResponse,
     VerifyTokenRequest,
@@ -39,6 +39,8 @@ from core.services.auth import (
     get_auth_service,
 )
 
+# 強制載入 .env 檔案到 os.environ，確保 os.getenv 能讀取到變數
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -52,21 +54,32 @@ def _get_liff_id_map() -> dict[str, str]:
     """
     Build LIFF ID map from environment variables.
     
-    Convention: {APP_NAME}_LIFF_ID or ADMIN_LINE_LIFF_ID_VERIFY (legacy)
+    Convention: AUTH_LIFF_ID for login pages (all apps share the same login LIFF)
     
     Returns:
         dict mapping app context names to LIFF IDs
     """
+    # 登入頁面使用專用的 AUTH_LIFF_ID（所有模組共用）
+    auth_liff = os.getenv("AUTH_LIFF_ID", "").strip()
+    
+    # Fallback to legacy variables if AUTH_LIFF_ID not set
+    if not auth_liff:
+        auth_liff = (
+            os.getenv("ADMIN_LINE_LIFF_ID_VERIFY") 
+            or os.getenv("DEFAULT_LIFF_ID")
+            or ""
+        ).strip()
+
+    # Debug Log: 幫助排查環境變數是否正確載入
+    logger.debug(f"LIFF ID for login page: '{auth_liff}'")
+
+    # 所有 app context 都使用同一個登入頁面 LIFF ID
     return {
-        # Default/Admin app - uses legacy env var for backward compatibility
-        "admin": os.getenv("ADMIN_LIFF_ID") or os.getenv("ADMIN_LINE_LIFF_ID_VERIFY", ""),
-        "administrative": os.getenv("ADMIN_LIFF_ID") or os.getenv("ADMIN_LINE_LIFF_ID_VERIFY", ""),
-        # Chatbot module
-        "chatbot": os.getenv("CHATBOT_LIFF_ID", ""),
-        # HR module (future)
-        "hr": os.getenv("HR_LIFF_ID", ""),
-        # Default fallback
-        "default": os.getenv("DEFAULT_LIFF_ID") or os.getenv("ADMIN_LINE_LIFF_ID_VERIFY", ""),
+        "admin": auth_liff,
+        "administrative": auth_liff,
+        "chatbot": auth_liff,
+        "hr": auth_liff,
+        "default": auth_liff,
     }
 
 
@@ -84,7 +97,18 @@ def _get_liff_id_for_app(app_context: str | None) -> str:
     app = (app_context or "default").lower().strip()
     
     # Try exact match first, then fallback to default
-    return liff_map.get(app) or liff_map.get("default", "")
+    liff_id = liff_map.get(app) or liff_map.get("default", "")
+    
+    if not liff_id:
+        logger.warning(
+            f"LIFF ID not found for app context: '{app}'. "
+            f"Available keys: {list(liff_map.keys())}. "
+            "Please check .env file and ADMIN_LINE_LIFF_ID_VERIFY."
+        )
+    else:
+        logger.info(f"Resolved LIFF ID for '{app}': {liff_id}")
+        
+    return liff_id
 
 
 def _get_app_config() -> dict:
@@ -126,7 +150,9 @@ def _render_template(template_name: str, variables: dict[str, str]) -> str:
     
     for key, value in variables.items():
         placeholder = "{{" + key + "}}"
-        content = content.replace(placeholder, str(value))
+        # Ensure value is not None before replacing
+        safe_value = str(value) if value is not None else ""
+        content = content.replace(placeholder, safe_value)
     
     return content
 
@@ -312,8 +338,9 @@ async def get_login_page(
     
     logger.info(f"Login page requested for app: {app_context}, LIFF ID: {liff_id}")
     
+    # 這裡如果不寫入 load_dotenv，liff_id 很可能為空
     if not liff_id:
-        logger.warning(f"No LIFF ID configured for app context: {app_context}")
+        logger.error(f"CRITICAL: No LIFF ID configured for app context: {app_context}. Login will fail.")
     
     try:
         html_content = _render_template("login.html", {
@@ -325,8 +352,7 @@ async def get_login_page(
         return HTMLResponse(content=html_content)
     except FileNotFoundError as e:
         logger.error(f"Login template not found: {e}")
-        # Fallback to legacy HTML
-        return HTMLResponse(content=get_login_html("", error="系統錯誤，請稍後再試"))
+        return HTMLResponse(content=get_login_html("", error="系統錯誤：找不到登入頁面模板"), status_code=500)
 
 
 @router.get("/page/verify-result", response_class=HTMLResponse)
@@ -336,19 +362,6 @@ async def get_verify_result_page(
 ) -> HTMLResponse:
     """
     Serve the unified verification result page.
-    
-    This page:
-    1. Extracts the token from URL
-    2. Calls POST /auth/api/verify via JavaScript
-    3. Shows success/error state
-    4. Closes the LIFF window (if in LINE app)
-    
-    Args:
-        token: Magic link token (passed to frontend for verification)
-        app: App context name for LIFF ID selection
-        
-    Returns:
-        HTMLResponse with the rendered verify result page
     """
     config = _get_app_config()
     app_context = app or "default"
@@ -367,7 +380,6 @@ async def get_verify_result_page(
         return HTMLResponse(content=html_content)
     except FileNotFoundError as e:
         logger.error(f"Verify result template not found: {e}")
-        # Fallback to legacy HTML with error
         return HTMLResponse(
             content=get_verification_result_html(False, "系統錯誤，請稍後再試", app_context)
         )
@@ -377,17 +389,7 @@ async def get_verify_result_page(
 async def get_liff_config(
     app: Annotated[str | None, Query(description="App context")] = None,
 ) -> dict:
-    """
-    Get LIFF configuration for a specific app context.
-    
-    This endpoint allows frontend to dynamically fetch LIFF ID if needed.
-    
-    Args:
-        app: App context name
-        
-    Returns:
-        dict with liff_id
-    """
+    """Get LIFF configuration for a specific app context."""
     app_context = app or "default"
     return {
         "liff_id": _get_liff_id_for_app(app_context),
@@ -406,14 +408,7 @@ async def login_page(
     success: Annotated[str | None, Query()] = None,
     app: Annotated[str | None, Query(description="App context")] = None,
 ) -> HTMLResponse:
-    """
-    Legacy login page endpoint.
-    
-    DEPRECATED: Use GET /auth/page/login?app={app} instead.
-    This endpoint is kept for backward compatibility with existing integrations.
-    """
-    # For legacy endpoint, we still use the inline HTML version
-    # which doesn't require LIFF (uses line_sub from URL directly)
+    """Legacy login page endpoint."""
     return HTMLResponse(content=get_login_html(line_sub, error, success))
 
 
@@ -423,17 +418,7 @@ async def request_magic_link(
     db: Annotated[AsyncSession, Depends(get_db_session)],
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> HTMLResponse:
-    """
-    Handle magic link request from login form.
-    
-    Accepts both legacy form data and new form data with app_context.
-    
-    Form fields:
-        - email: User's company email
-        - line_sub: LINE user identifier
-        - line_id_token: (optional) LINE ID token for verification
-        - app_context: (optional) App context for magic link generation
-    """
+    """Handle magic link request from login form."""
     form_data = await request.form()
     email = str(form_data.get("email", "")).strip().lower()
     line_sub = str(form_data.get("line_sub", "")).strip()
@@ -443,7 +428,6 @@ async def request_magic_link(
         return HTMLResponse(content=get_login_html(line_sub, error="請填寫電子郵件"), status_code=400)
 
     try:
-        # Pass app_context to service for magic link generation
         await auth_service.initiate_magic_link(email, line_sub, app_context=app_context)
         return HTMLResponse(content=get_login_html(line_sub, success=f"驗證連結已發送至 {email}"))
     except EmailNotFoundError as e:
@@ -463,32 +447,19 @@ async def verify_magic_link(
     db: Annotated[AsyncSession, Depends(get_db_session)] = None,
     auth_service: Annotated[AuthService, Depends(get_auth_service)] = None,
 ) -> HTMLResponse:
-    """
-    Magic link verification endpoint with legacy compatibility.
-    
-    Behavior:
-        - If Accept header contains 'application/json': Return JSON (handled by /auth/api/verify)
-        - If browser navigation (HTML): Redirect to /auth/page/verify-result
-        
-    This allows the same URL in email links to work whether opened in:
-        - LIFF browser (redirects to verify-result page which calls API)
-        - Regular browser (same redirect behavior)
-    """
+    """Magic link verification endpoint with legacy compatibility."""
     # Check if this is an API request (JSON expected)
     accept_header = request.headers.get("accept", "")
     if "application/json" in accept_header:
-        # Redirect to API endpoint for JSON response
         raise HTTPException(
             status_code=307,
             headers={"Location": f"/auth/api/verify?token={token}"}
         )
     
     # Browser request - render the verification result page directly
-    # This avoids redirect issues and allows injecting the token if available
     config = _get_app_config()
     app_context = app or "default"
     liff_id = _get_liff_id_for_app(app_context)
-    
     token_val = token or ""
     
     try:
@@ -508,20 +479,14 @@ async def verify_magic_link(
 # API Endpoints (JSON responses)
 # =============================================================================
 
-
 @router.post("/magic-link", response_model=MagicLinkResponse)
 async def api_request_magic_link(
     request_data: MagicLinkRequest,
     db: Annotated[AsyncSession, Depends(get_db_session)],
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> MagicLinkResponse:
-    """
-    API endpoint for requesting magic link (JSON).
-    
-    Used by programmatic clients or AJAX requests.
-    """
+    """API endpoint for requesting magic link (JSON)."""
     try:
-        # Extract app_context if provided in request
         app_context = getattr(request_data, 'app_context', None)
         await auth_service.initiate_magic_link(
             request_data.email, 
@@ -541,11 +506,7 @@ async def api_verify_token(
     db: Annotated[AsyncSession, Depends(get_db_session)],
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> VerifyTokenResponse:
-    """
-    API endpoint for token verification (JSON).
-    
-    Called by verify_result.html JavaScript to complete verification.
-    """
+    """API endpoint for token verification (JSON)."""
     try:
         user = await auth_service.verify_magic_token(request_data.token, db)
         return VerifyTokenResponse(success=True, message="Verification successful", user=user)
