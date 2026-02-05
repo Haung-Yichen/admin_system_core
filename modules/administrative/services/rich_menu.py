@@ -93,9 +93,9 @@ class RichMenuService:
                         "height": button_height,
                     },
                     "action": {
-                        "type": "postback",
-                        "data": "action=coming_soon&feature=overtime",
-                        "label": "加班申請",
+                        "type": "uri",
+                        "uri": "https://ap13.ragic.com/HSIBAdmSys/home/1?PAGEID=aNM",
+                        "label": "ragic",
                     },
                 },
                 {
@@ -106,9 +106,9 @@ class RichMenuService:
                         "height": button_height,
                     },
                     "action": {
-                        "type": "postback",
-                        "data": "action=coming_soon&feature=expense",
-                        "label": "費用報銷",
+                        "type": "uri",
+                        "uri": "https://ins.hsib.com.tw?openExternalBrowser=1",
+                        "label": "創時系統",
                     },
                 },
                 # Row 2

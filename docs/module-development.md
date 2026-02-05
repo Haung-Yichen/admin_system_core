@@ -261,6 +261,66 @@ class MyModule(IAppModule):
 - 驗證 Webhook 簽章
 - 將事件分派至對應模組
 
+#### 7.1 Follow 事件處理 (必須實作)
+
+> [!IMPORTANT]
+> 所有 LINE 模組 **必須** 處理 `follow` 事件並發送身份驗證按鈕。
+> **禁止** 發送任何歡迎訊息或問候語。
+
+當用戶加入 LINE 官方帳號時，模組應：
+1. 檢查用戶是否已綁定公司帳號
+2. 若未綁定：發送框架標準的驗證按鈕
+3. 若已綁定：**不發送任何訊息**（靜默處理）
+
+```python
+async def handle_line_event(self, event: dict, context: AppContext) -> dict | None:
+    event_type = event.get("type")
+    user_id = event.get("source", {}).get("userId")
+    reply_token = event.get("replyToken")
+    
+    if event_type == "follow":
+        await self._handle_follow_event(user_id, reply_token)
+        return {"status": "ok", "action": "follow"}
+    
+    # ... 其他事件處理
+
+async def _handle_follow_event(self, user_id: str, reply_token: str | None) -> None:
+    """
+    Handle LINE follow event.
+    
+    Per framework guidelines:
+    - MUST send verification button for unbound users
+    - MUST NOT send welcome messages
+    """
+    if not reply_token:
+        return
+
+    from core.database.session import get_thread_local_session
+    from core.line_auth import line_auth_check
+    from modules.chatbot.services import get_line_service
+
+    line_service = get_line_service()
+
+    async with get_thread_local_session() as db:
+        # app_context 應為模組名稱，用於 LIFF ID 注入
+        is_auth, auth_messages = await line_auth_check(
+            user_id, db, app_context="my_module"
+        )
+
+    if is_auth:
+        # 已驗證：不發送任何訊息
+        pass
+    else:
+        # 未驗證：發送驗證按鈕
+        await line_service.reply(reply_token, auth_messages)
+```
+
+> [!WARNING]
+> 不要發送歡迎訊息的原因：
+> 1. 避免用戶被多條訊息打擾
+> 2. 保持一致的 UX（所有模組行為相同）
+> 3. 驗證按鈕已包含必要的引導文字
+
 ---
 
 ### 8. 前端開發 (Front-End Development)

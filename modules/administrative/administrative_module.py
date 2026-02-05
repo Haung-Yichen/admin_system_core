@@ -338,7 +338,11 @@ class AdministrativeModule(IAppModule):
             f"Administrative module handling LINE event: {event_type} from {user_id}")
 
         try:
-            if event_type == "message":
+            if event_type == "follow":
+                await self._handle_follow_event(user_id, reply_token)
+                return {"status": "ok", "action": "follow"}
+
+            elif event_type == "message":
                 message_data = event.get("message", {})
                 if message_data.get("type") == "text":
                     text = message_data.get("text", "").strip().lower()
@@ -360,6 +364,43 @@ class AdministrativeModule(IAppModule):
     def _should_show_menu(self, text: str) -> bool:
         """Check if the text message should trigger the admin menu."""
         return any(trigger in text for trigger in self.MENU_TRIGGERS)
+
+    async def _handle_follow_event(
+        self, user_id: str, reply_token: str | None
+    ) -> None:
+        """
+        Handle LINE follow event (user added the bot).
+        
+        Per framework guidelines, only sends the verification button.
+        Do NOT send welcome messages - just the auth prompt.
+        """
+        if not reply_token:
+            return
+
+        from core.database.session import get_thread_local_session
+        from core.line_auth import line_auth_check
+        from core.line_client import LineClient
+
+        # 使用 administrative 模組自己的 LINE credentials
+        line_client = LineClient(
+            channel_secret=self._settings.line_channel_secret.get_secret_value(),
+            access_token=self._settings.line_channel_access_token.get_secret_value(),
+        )
+
+        try:
+            async with get_thread_local_session() as db:
+                is_auth, auth_messages = await line_auth_check(
+                    user_id, db, app_context="administrative"
+                )
+
+            if is_auth:
+                # 已驗證用戶：不發送任何訊息（由 Rich Menu 引導操作）
+                pass
+            else:
+                # 未驗證用戶：僅發送驗證按鈕
+                await line_client.post_reply(reply_token, auth_messages)
+        finally:
+            await line_client.close()
 
     async def _handle_menu_request(
         self, user_id: str, reply_token: str | None

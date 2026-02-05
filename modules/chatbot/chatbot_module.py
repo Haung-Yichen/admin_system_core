@@ -226,7 +226,12 @@ class ChatbotModule(IAppModule):
             return {"status": "error", "error": str(e)}
 
     async def _handle_follow_event(self, user_id: str, reply_token: str | None) -> None:
-        """Handle LINE follow event (user added the bot)."""
+        """
+        Handle LINE follow event (user added the bot).
+        
+        Per framework guidelines, only sends the verification button.
+        Do NOT send welcome messages - just the auth prompt.
+        """
         if not reply_token:
             return
 
@@ -240,11 +245,10 @@ class ChatbotModule(IAppModule):
             is_auth, auth_messages = await line_auth_check(user_id, db, app_context="chatbot")
 
         if is_auth:
-            await line_service.reply(reply_token, [
-                {"type": "text", "text": "👋 歡迎回來！您可以直接輸入問題查詢 SOP。"}
-            ])
+            # 已驗證用戶：不發送任何訊息（由使用者主動查詢觸發回覆）
+            pass
         else:
-            # 僅發送驗證按鈕，不發送額外歡迎訊息
+            # 未驗證用戶：僅發送驗證按鈕
             await line_service.reply(reply_token, auth_messages)
 
     async def _handle_text_message(
