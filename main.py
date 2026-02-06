@@ -129,14 +129,21 @@ def create_fastapi_app(context: AppContext, registry: ModuleRegistry) -> FastAPI
                 context.log_event(f"Registered API router for module: {name} at /api", "LOADER")
 
     # Mount static files for web dashboard
+    logger = logging.getLogger(__name__)
     static_dir = Path(__file__).parent / "static"
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+        logger.info(f"Mounted static files at /static from {static_dir}")
+    else:
+        logger.warning(f"Static directory not found: {static_dir}")
 
     # Mount core framework static files (auth pages, etc.)
     core_static_dir = Path(__file__).parent / "core" / "static"
     if core_static_dir.exists():
         app.mount("/static/core", StaticFiles(directory=str(core_static_dir)), name="core-static")
+        logger.debug(f"Mounted core static files at /static/core")
+    else:
+        logger.warning(f"Core static directory not found: {core_static_dir}")
 
     return app
 
@@ -195,10 +202,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("Shutting down Admin System Core...")
 
         if _registry:
+            module_count = len(_registry.get_module_names())
             _registry.shutdown_all()
+            logger.info(f"All {module_count} module(s) shut down")
 
         await close_db_connections()
-        logger.info("Cleanup complete")
+        logger.info("Database connections closed")
+        logger.info("Shutdown complete")
 
 
 # -----------------------------------------------------------------------------

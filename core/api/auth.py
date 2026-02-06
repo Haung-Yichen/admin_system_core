@@ -106,7 +106,7 @@ def _get_liff_id_for_app(app_context: str | None) -> str:
             "Please check .env file and ADMIN_LINE_LIFF_ID_VERIFY."
         )
     else:
-        logger.info(f"Resolved LIFF ID for '{app}': {liff_id}")
+        logger.debug(f"Resolved LIFF ID for '{app}': {liff_id}")
         
     return liff_id
 

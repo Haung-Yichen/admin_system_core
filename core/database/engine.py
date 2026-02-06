@@ -3,13 +3,26 @@ Database Engine Management Module.
 
 Provides a singleton AsyncEngine for the entire application.
 Uses configuration from core.app_context.ConfigLoader.
+
+SSL Configuration:
+    DATABASE_SSL_MODE controls SSL behavior:
+    - "verify-full": Full SSL verification with certificate check (RECOMMENDED for production)
+    - "require": Require SSL but don't verify certificate (default, for cloud DBs with dynamic certs)
+    - "prefer": Try SSL first, fallback to non-SSL
+    - "disable": No SSL (only for local development)
+    
+    DATABASE_SSL_CERT_PATH: Path to CA certificate file (required for verify-full mode)
 """
 
+import logging
+import os
+import ssl
 import threading
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from core.app_context import ConfigLoader
 
+_logger = logging.getLogger(__name__)
 
 # Global engine instance (singleton for main thread)
 _engine: AsyncEngine | None = None
@@ -18,14 +31,69 @@ _engine: AsyncEngine | None = None
 _thread_local = threading.local()
 
 
-
-def _get_ssl_context():
-    """Create a permissive SSL context for database connections."""
-    import ssl
+def _get_ssl_context() -> ssl.SSLContext | bool | None:
+    """
+    Create SSL context based on DATABASE_SSL_MODE environment variable.
+    
+    Returns:
+        ssl.SSLContext for verify-full mode
+        True for require/prefer mode (asyncpg handles SSL)
+        None for disable mode
+    """
+    ssl_mode = os.getenv("DATABASE_SSL_MODE", "require").lower()
+    
+    if ssl_mode == "disable":
+        _logger.warning(
+            "DATABASE_SSL_MODE=disable: SSL is disabled. "
+            "This is insecure and should only be used for local development."
+        )
+        return None
+    
+    if ssl_mode == "verify-full":
+        # Full verification with certificate
+        cert_path = os.getenv("DATABASE_SSL_CERT_PATH", "")
+        
+        if not cert_path:
+            _logger.error(
+                "DATABASE_SSL_MODE=verify-full requires DATABASE_SSL_CERT_PATH. "
+                "Falling back to 'require' mode."
+            )
+            ssl_mode = "require"
+        else:
+            try:
+                ctx = ssl.create_default_context(cafile=cert_path)
+                ctx.check_hostname = True
+                ctx.verify_mode = ssl.CERT_REQUIRED
+                _logger.info(f"SSL mode: verify-full with cert: {cert_path}")
+                return ctx
+            except Exception as e:
+                _logger.error(
+                    f"Failed to load SSL certificate from {cert_path}: {e}. "
+                    "Falling back to 'require' mode."
+                )
+                ssl_mode = "require"
+    
+    if ssl_mode in ("require", "prefer"):
+        # Require SSL but don't verify certificate
+        # This is common for cloud databases with dynamic certificates
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        _logger.info(
+            f"SSL mode: {ssl_mode} (SSL enabled, certificate verification disabled). "
+            "Consider using verify-full for production."
+        )
+        return ctx
+    
+    # Unknown mode, default to require
+    _logger.warning(
+        f"Unknown DATABASE_SSL_MODE '{ssl_mode}'. Using 'require' mode."
+    )
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     return ctx
+
 
 def get_engine(debug: bool = False) -> AsyncEngine:
     """

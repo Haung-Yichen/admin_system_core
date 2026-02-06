@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin 模組使用註冊教學</title>
+    <title>智能助理服務註冊教學</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
@@ -50,23 +50,24 @@
         .container {
             max-width: 900px;
             margin: 0 auto;
-            padding: 60px 20px 100px;
+            padding: 40px 20px 60px;
         }
 
         /* Header Styles */
         header {
             text-align: center;
-            margin-bottom: 80px;
+            margin-bottom: 40px;
             opacity: 0;
             animation: fadeInDown 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
 
         h1 {
-            font-size: 3rem;
+            font-size: 2.25rem;
             font-weight: 800;
-            margin-bottom: 16px;
+            margin-bottom: 24px;
             letter-spacing: -0.02em;
             background: linear-gradient(135deg, #60a5fa 0%, #a855f7 100%);
+            background-clip: text;
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             text-shadow: 0 10px 30px rgba(96, 165, 250, 0.2);
@@ -74,22 +75,44 @@
 
         .subtitle {
             color: var(--text-secondary);
-            font-size: 1.25rem;
-            max-width: 600px;
+            font-size: 1.1rem;
+            max-width: 700px;
             margin: 0 auto;
             font-weight: 400;
         }
 
+        .role-badge {
+            display: inline-block;
+            background: rgba(168, 85, 247, 0.15);
+            color: #d8b4fe;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            margin-bottom: 12px;
+            border: 1px solid rgba(168, 85, 247, 0.3);
+        }
+
+        .notice-box {
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            border-radius: 12px;
+            padding: 16px;
+            margin-top: 24px;
+            text-align: left;
+            font-size: 0.95rem;
+        }
+
+
         /* Step Card Styles */
         .step-wrapper {
             position: relative;
-            margin-bottom: 60px;
+            margin-bottom: 40px;
         }
 
         .step-card {
             background: var(--bg-secondary);
             border-radius: var(--card-radius);
-            padding: 40px;
+            padding: 24px;
             border: 1px solid rgba(255, 255, 255, 0.05);
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 2px 4px -1px rgba(0, 0, 0, 0.1);
             transition: var(--transition);
@@ -98,7 +121,7 @@
             animation: fadeInUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 40px;
+            gap: 24px;
             align-items: center;
             overflow: hidden;
         }
@@ -190,26 +213,26 @@
             justify-content: center;
             background: rgba(59, 130, 246, 0.15);
             color: var(--accent);
-            padding: 6px 12px;
+            padding: 4px 10px;
             border-radius: 99px;
-            font-size: 0.875rem;
+            font-size: 0.75rem;
             font-weight: 700;
-            margin-bottom: 16px;
+            margin-bottom: 12px;
             border: 1px solid rgba(59, 130, 246, 0.3);
             box-shadow: 0 0 20px rgba(59, 130, 246, 0.1);
         }
 
         .step-title {
-            font-size: 1.75rem;
+            font-size: 1.5rem;
             font-weight: 700;
-            margin: 0 0 16px 0;
+            margin: 0 0 12px 0;
             color: var(--text-primary);
         }
 
         .step-description {
             color: var(--text-secondary);
-            font-size: 1.1rem;
-            margin-bottom: 24px;
+            font-size: 1rem;
+            margin-bottom: 16px;
             white-space: pre-line;
             /* Allows using newlines in text */
         }
@@ -338,8 +361,18 @@
 
     <div class="container">
         <header>
-            <h1>Admin 模組使用與註冊教學</h1>
-            <p class="subtitle">歡迎使用我們的智能助理服務，請依照以下圖解步驟完成初始設定，即可開始享受便捷的自動化服務。</p>
+            <h1>智能助理與行政系統 註冊教學</h1>
+            <div class="subtitle">
+                <p>歡迎使用我們的整合服務。本教學適用於「行政作業系統」與「Chatbot」之身份綁定。</p>
+                <div class="notice-box">
+                    <p style="margin: 0 0 10px 0; color: #60a5fa; font-weight: 600;">ℹ️ 系統整合說明：</p>
+                    <ul style="margin: 0; padding-left: 20px; list-style-type: disc;">
+                        <li>兩者共用同一套登入驗證機制，<strong>您只需在其中一個系統完成綁定，即可同時開通使用權限</strong>，無須重複註冊。</li>
+                        <li style="margin-top: 8px;"><strong>目前僅先推出「行政作業帳號」功能</strong>。</li>
+                        <li style="margin-top: 8px; color: #94a3b8;">Chatbot 功能將於知識庫建置完畢後推出，敬請期待。</li>
+                    </ul>
+                </div>
+            </div>
         </header>
 
         <!-- Step 1: Welcome & Link -->
@@ -350,7 +383,7 @@
                     <h2 class="step-title">接收歡迎訊息</h2>
                     <div class="step-description">
                         加入官方帳號後，您會收到一則歡迎訊息。
-                        <br><br>
+
                         系統會自動發送「註冊連結」，請點擊該連結準備開始進行身份綁定。
                     </div>
                 </div>
@@ -372,7 +405,7 @@
                     <h2 class="step-title">進入註冊頁面</h2>
                     <div class="step-description">
                         點擊聊天室中的註冊按鈕後，將進入綁定流程。
-                        <br><br>
+
                         請輸入創時系統中登記的email，本服務將使用該email進行驗證您的員工身份。
                     </div>
                 </div>
@@ -394,7 +427,7 @@
                     <h2 class="step-title">發送驗證連結</h2>
                     <div class="step-description">
                         系統將發送驗證連結至您的信箱。
-                        <br><br>
+
                         請至信箱收信，並點擊驗證連結。
                     </div>
                 </div>
@@ -413,9 +446,15 @@
             <div class="step-card">
                 <div class="step-content">
                     <span class="step-badge">STEP 04</span>
-                    <h2 class="step-title">到gmail收信</h2>
+                    <h2 class="step-title">註冊完成與功能啟用</h2>
                     <div class="step-description">
-                        點擊驗證連結後，會自動跳轉至註冊結果頁面。
+                        點擊驗證連結後，會自動跳轉至註冊結果頁面，代表綁定成功。
+
+                        <strong>功能啟用說明：</strong>
+                        <ul>
+                            <li><strong>行政作業系統：</strong> 完成後，您可於選單點擊「行政作業系統」按鈕立即開始使用。</li>
+                            <li><strong>Chatbot 智能助理：</strong> 此功能目前建置中，敬請期待後續開放。</li>
+                        </ul>
                     </div>
                 </div>
                 <div class="step-visual">

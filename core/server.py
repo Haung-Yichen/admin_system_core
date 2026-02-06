@@ -52,23 +52,56 @@ def create_base_app(
     # Get allowed origins from configuration (defaults to BASE_URL only)
     config = context.config
     base_url = config.get("server.base_url", "")
-    allowed_origins = [base_url] if base_url else []
+    is_debug = config.get("app.debug", False)
+    
+    allowed_origins: list[str] = []
+    
+    if base_url:
+        allowed_origins.append(base_url)
     
     # In debug mode, also allow localhost for development
-    if config.get("app.debug", False):
+    if is_debug:
         allowed_origins.extend([
             "http://localhost:8000",
             "http://127.0.0.1:8000",
             "https://localhost:8000",
         ])
     
+    # Security: Never fallback to ["*"] in production
+    # If no origins configured in non-debug mode, log warning and use empty list
+    if not allowed_origins:
+        if is_debug:
+            # In debug mode, allow common dev origins as fallback
+            _logger.warning(
+                "BASE_URL not configured. Using localhost origins for CORS in debug mode."
+            )
+            allowed_origins = [
+                "http://localhost:8000",
+                "http://127.0.0.1:8000",
+            ]
+        else:
+            # In production, do NOT allow any origins if not explicitly configured
+            _logger.error(
+                "CRITICAL: BASE_URL not configured and not in debug mode. "
+                "CORS will reject all cross-origin requests. "
+                "Please set BASE_URL environment variable."
+            )
+            # Use empty list - this blocks all cross-origin requests
+            allowed_origins = []
+    
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=allowed_origins if allowed_origins else ["*"],
+        allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-Line-ID-Token", "X-Hub-Signature-256"],
     )
+    
+    # Log CORS configuration
+    if allowed_origins:
+        _logger.info(f"CORS configured with {len(allowed_origins)} origin(s): {allowed_origins}")
+    else:
+        _logger.warning("CORS configured with no allowed origins (all cross-origin requests will be blocked)")
 
     # Add security headers middleware
     @app.middleware("http")
