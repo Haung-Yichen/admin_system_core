@@ -118,9 +118,13 @@ Admin System Core 採用 **Modular Monolith (模組化單體)** 架構。
 *   **功能**: 確保本地認證與查詢的效能與資料一致性。
 
 ### EmailService (`core/services/email.py`)
-統一的郵件發送服務，支援 SMTP 與非同步發送。
-*   `send_email`: 發送 HTML 郵件
-*   `send_verification_email`: 發送標準驗證信模板
+統一的郵件發送服務，採用集中式管理。
+*   **架構**: 模組透過 `get_email_service()` 取得單例，底層自動處理 SMTP 連線與配置。
+*   **配置**: 支援 `config.yaml` 與環境變數 (`SMTP_*`)，具備自動 Fallback 機制。
+*   **模板**: 提供 `EmailTemplates` 類別，統一管理所有系統信件樣式與內容。
+*   **模式**: 
+    *   `send_sync`: 用於背景任務或 Celery Worker (使用 `smtplib`)
+    *   `send_async`: 用於 FastAPI Route Handler (使用 `aiosmtplib`)
 
 ### RagicService (Compatibility Layer) (`core/services/ragic.py`)
 舊版服務介面，現已重構為封裝 `core/ragic` 的功能。

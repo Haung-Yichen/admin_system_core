@@ -14,8 +14,6 @@ import hashlib
 import logging
 import os
 from datetime import datetime, timezone
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from typing import Any
 from urllib.parse import urlencode
 
@@ -49,8 +47,8 @@ class EmailNotFoundError(AuthError):
     pass
 
 
-# Import EmailSendError from email module for consistency
-from core.services.email import EmailSendError
+# Import email service and templates for unified sending
+from core.services.email import EmailSendError, EmailTemplates, get_email_service
 
 
 class UserBindingError(AuthError):
@@ -766,74 +764,32 @@ class AuthService:
     async def _send_verification_email(
         self, to_email: str, employee_name: str, magic_link: str
     ) -> None:
-        """Send verification email with magic link."""
+        """
+        Send verification email with magic link.
+        
+        Delegates to core EmailService for actual sending.
+        """
         logger.info(f"Sending verification email to: {to_email}")
 
-        # Get config values
         expire_minutes = int(self._security_config.get(
             "magic_link_expire_minutes", 15))
-        smtp_from_name = self._email_config.get("from_name", "Admin System")
-        smtp_from_email = self._email_config.get("from_email", "")
-        smtp_host = self._email_config.get("host", "")
-        smtp_port = int(self._email_config.get("port", 587))
-        smtp_user = self._email_config.get("username", "")
-        smtp_pass = self._email_config.get("password", "")
 
-        try:
-            msg = MIMEMultipart("alternative")
-            msg["Subject"] = f"🔐 {self._app_name} - 綁定您的 LINE 帳號"
-            msg["From"] = f"{smtp_from_name} <{smtp_from_email}>"
-            msg["To"] = to_email
+        # Use EmailTemplates for consistent email content
+        subject, html_content, text_content = EmailTemplates.magic_link_verification(
+            employee_name=employee_name,
+            magic_link=magic_link,
+            expire_minutes=expire_minutes,
+            app_name=self._app_name,
+        )
 
-            text_content = f"""
-您好 {employee_name}，
-
-您正在將 LINE 帳號與 {self._app_name} 進行綁定。
-
-請點擊以下連結完成驗證：
-{magic_link}
-
-此連結將在 {expire_minutes} 分鐘後失效。
-
-如果您沒有發起此請求，請忽略此郵件。
-
-{self._app_name} 團隊
-""".strip()
-
-            html_content = f"""
-<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"></head>
-<body style="font-family: sans-serif;">
-    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-        <h2 style="color: #00B900;">🔐 {self._app_name}</h2>
-        <p>您好 <strong>{employee_name}</strong>，</p>
-        <p>您正在將 LINE 帳號與系統進行綁定。</p>
-        <p><a href="{magic_link}" style="background: #00B900; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">✅ 完成綁定</a></p>
-        <p style="color: #888; font-size: 12px;">此連結將在 {expire_minutes} 分鐘後失效。</p>
-    </div>
-</body>
-</html>
-"""
-
-            msg.attach(MIMEText(text_content, "plain"))
-            msg.attach(MIMEText(html_content, "html"))
-
-            import aiosmtplib
-            await aiosmtplib.send(
-                msg,
-                hostname=smtp_host,
-                port=smtp_port,
-                start_tls=True,
-                username=smtp_user,
-                password=smtp_pass,
-            )
-
-            logger.info(f"Email sent to: {to_email}")
-
-        except Exception as e:
-            logger.error(f"Email send error: {e}")
-            raise EmailSendError(f"Failed to send email: {e}") from e
+        # Delegate to core EmailService
+        email_service = get_email_service()
+        await email_service.send_async(
+            to_email=to_email,
+            subject=subject,
+            html_content=html_content,
+            text_content=text_content,
+        )
 
 
 # Singleton

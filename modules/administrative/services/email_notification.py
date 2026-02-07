@@ -2,15 +2,15 @@
 Email Notification Service.
 
 Handles sending email notifications for administrative workflows.
+Delegates to core.services.email.EmailService for actual sending.
 """
 
 import logging
 import os
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from typing import Optional
 from urllib.parse import urlencode
+
+from core.services.email import get_email_service, EmailTemplates
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,8 @@ class EmailNotificationService:
     """
     Service for sending email notifications.
     
-    Uses SMTP to send formatted HTML emails for leave request notifications.
+    Delegates to core.services.email.EmailService for actual SMTP sending.
+    This class provides business-specific templates and convenience methods.
     """
     
     # Company info
@@ -72,31 +73,22 @@ class EmailNotificationService:
     
     def __init__(self, liff_id_verify: str = "") -> None:
         """
-        Initialize email service with SMTP configuration from environment.
+        Initialize email notification service.
         
         Args:
             liff_id_verify: LIFF ID for verification deep links (optional).
         """
-        self._smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
-        self._smtp_port = int(os.getenv("SMTP_PORT", "587"))
-        self._smtp_username = os.getenv("SMTP_USERNAME", "")
-        self._smtp_password = os.getenv("SMTP_PASSWORD", "")
-        self._from_email = os.getenv("SMTP_FROM_EMAIL", "")
-        self._from_name = os.getenv("SMTP_FROM_NAME", "高成保經行政系統")
-        
         # LIFF deep link generator (Dependency Injection)
         self._liff_link_generator = LiffDeepLinkGenerator(
             liff_id=liff_id_verify or os.getenv("ADMIN_LINE_LIFF_ID_VERIFY", "")
         )
+        
+        # Get core email service (handles all SMTP config)
+        self._email_service = get_email_service()
     
     def _is_configured(self) -> bool:
-        """Check if SMTP is properly configured."""
-        return bool(
-            self._smtp_host and 
-            self._smtp_username and 
-            self._smtp_password and 
-            self._from_email
-        )
+        """Check if email service is properly configured."""
+        return self._email_service.is_configured
     
     def generate_verification_magic_link(self, token: str) -> str:
         """
@@ -528,7 +520,7 @@ class EmailNotificationService:
     
     def _send_email(self, to_email: str, subject: str, html_content: str) -> bool:
         """
-        Send an HTML email via SMTP.
+        Send an HTML email via core EmailService.
         
         Args:
             to_email: Recipient email address
@@ -539,34 +531,14 @@ class EmailNotificationService:
             bool: True if sent successfully, False otherwise
         """
         try:
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = subject
-            msg['From'] = f"{self._from_name} <{self._from_email}>"
-            msg['To'] = to_email
-            
-            # Attach HTML content
-            html_part = MIMEText(html_content, 'html', 'utf-8')
-            msg.attach(html_part)
-            
-            # Send via SMTP
-            logger.info(f"Sending leave confirmation email to {to_email}")
-            
-            with smtplib.SMTP(self._smtp_host, self._smtp_port) as server:
-                server.starttls()
-                server.login(self._smtp_username, self._smtp_password)
-                server.sendmail(self._from_email, [to_email], msg.as_string())
-            
-            logger.info(f"Email sent successfully to {to_email}")
-            return True
-            
-        except smtplib.SMTPAuthenticationError as e:
-            logger.error(f"SMTP authentication failed: {e}")
-            return False
-        except smtplib.SMTPException as e:
-            logger.error(f"SMTP error sending email: {e}")
-            return False
+            logger.info(f"Sending email to {to_email}: {subject}")
+            return self._email_service.send_sync(
+                to_email=to_email,
+                subject=subject,
+                html_content=html_content,
+            )
         except Exception as e:
-            logger.error(f"Unexpected error sending email: {e}")
+            logger.error(f"Email send error: {e}")
             return False
 
 

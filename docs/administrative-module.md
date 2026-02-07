@@ -254,6 +254,29 @@ employee = await service.get_employee_by_email("user@example.com", db)
 result = await service.submit_leave_request(request_data, db)
 ```
 
+### EmailNotificationService
+
+處理行政相關的郵件通知（如請假確認信、簽核通知）。
+
+```python
+from modules.administrative.services import get_email_notification_service
+
+# 獲取服務
+email_service = get_email_notification_service()
+
+# 發送請假確認信
+# 底層會委派給 core.services.email.EmailService 進行實際發送
+email_service.send_leave_request_confirmation(
+    to_email="user@example.com",
+    employee_name="王小明",
+    leave_dates=["2026-02-01"],
+    # ... 其他參數
+)
+```
+**特性：**
+- **模板封裝**：將業務特定的 HTML 模板邏輯封裝於此。
+- **Core Delegation**：本身不處理 SMTP 連線，完全依賴核心 `EmailService`。
+
 ---
 
 ## 環境變數

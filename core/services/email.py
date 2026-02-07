@@ -9,6 +9,7 @@ implementing their own email sending logic.
 """
 
 import logging
+import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -25,15 +26,36 @@ class EmailSendError(Exception):
 
 
 class EmailConfig:
-    """Email configuration from config.yaml."""
+    """
+    Email configuration with fallback to environment variables.
+    
+    Priority: config dict > environment variables > defaults
+    
+    Environment Variables:
+        SMTP_HOST: SMTP server hostname
+        SMTP_PORT: SMTP server port
+        SMTP_USERNAME: SMTP username
+        SMTP_PASSWORD: SMTP password
+        SMTP_FROM_EMAIL: Sender email address
+        SMTP_FROM_NAME: Sender display name
+    """
     
     def __init__(self, config: dict[str, Any]) -> None:
-        self.host = config.get("host", "smtp.gmail.com")
-        self.port = int(config.get("port", 587))
-        self.username = config.get("username", "")
-        self.password = config.get("password", "")
-        self.from_email = config.get("from_email", "")
-        self.from_name = config.get("from_name", "Admin System")
+        # Config dict takes priority (None means not set), then env vars, then defaults
+        # Note: empty string in config means explicitly empty, not fallback to env
+        def _get_value(key: str, env_var: str, default: str) -> str:
+            value = config.get(key)
+            if value is not None:  # Explicit value (even if empty string)
+                return value
+            return os.getenv(env_var, default)
+        
+        self.host = _get_value("host", "SMTP_HOST", "smtp.gmail.com")
+        port_val = config.get("port")
+        self.port = int(port_val if port_val is not None else os.getenv("SMTP_PORT", "587"))
+        self.username = _get_value("username", "SMTP_USERNAME", "")
+        self.password = _get_value("password", "SMTP_PASSWORD", "")
+        self.from_email = _get_value("from_email", "SMTP_FROM_EMAIL", "")
+        self.from_name = _get_value("from_name", "SMTP_FROM_NAME", "Admin System")
         self.use_tls = config.get("use_tls", True)
     
     @property

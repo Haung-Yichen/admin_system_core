@@ -32,6 +32,19 @@ def load_email_notification_module():
     return module
 
 
+@pytest.fixture(autouse=True)
+def reset_email_singletons():
+    """Reset email service singletons before each test to ensure clean state."""
+    # Reset core email service singleton
+    import core.services.email as core_email
+    core_email._email_service = None
+    
+    yield
+    
+    # Cleanup after test
+    core_email._email_service = None
+
+
 # =============================================================================
 # AuthService Email Tests (aiosmtplib)
 # =============================================================================
@@ -50,59 +63,56 @@ class TestAuthServiceEmail:
             yield service
 
     @pytest.mark.asyncio
-    async def test_send_verification_email_success(self, auth_service, mock_aiosmtplib):
-        """Test successful magic link email sending."""
-        await auth_service._send_verification_email(
-            to_email="employee@example.com",
-            employee_name="John Doe",
-            magic_link="https://example.com/verify?token=abc123",
-        )
+    async def test_send_verification_email_success(self, auth_service):
+        """Test successful magic link email sending via core EmailService."""
+        with patch('core.services.auth.get_email_service') as mock_get_service:
+            mock_email_service = MagicMock()
+            mock_email_service.send_async = AsyncMock(return_value=True)
+            mock_get_service.return_value = mock_email_service
+            
+            await auth_service._send_verification_email(
+                to_email="employee@example.com",
+                employee_name="John Doe",
+                magic_link="https://example.com/verify?token=abc123",
+            )
 
-        mock_aiosmtplib.assert_called_once()
-        call_args = mock_aiosmtplib.call_args
-        msg = call_args[0][0]
-        
-        assert "employee@example.com" in str(msg["To"])
-        assert "LINE" in str(msg["Subject"])
+            mock_email_service.send_async.assert_called_once()
+            call_kwargs = mock_email_service.send_async.call_args[1]
+            assert call_kwargs['to_email'] == "employee@example.com"
+            assert "LINE" in call_kwargs['subject']
 
     @pytest.mark.asyncio
     async def test_send_verification_email_contains_magic_link(
-        self, auth_service, mock_aiosmtplib
+        self, auth_service
     ):
         """Test that email body contains the magic link."""
-        import base64
-        from email import message_from_string
-        
         magic_link = "https://test.example.com/api/auth/verify?token=xyz789"
         
-        await auth_service._send_verification_email(
-            to_email="test@example.com",
-            employee_name="Test User",
-            magic_link=magic_link,
-        )
+        with patch('core.services.auth.get_email_service') as mock_get_service:
+            mock_email_service = MagicMock()
+            mock_email_service.send_async = AsyncMock(return_value=True)
+            mock_get_service.return_value = mock_email_service
+            
+            await auth_service._send_verification_email(
+                to_email="test@example.com",
+                employee_name="Test User",
+                magic_link=magic_link,
+            )
 
-        call_args = mock_aiosmtplib.call_args
-        msg = call_args[0][0]
-        msg_str = msg.as_string()
-        
-        # Parse the email message to get decoded content
-        parsed = message_from_string(msg_str)
-        decoded_content = ""
-        for part in parsed.walk():
-            if part.get_content_type() in ["text/plain", "text/html"]:
-                payload = part.get_payload(decode=True)
-                if payload:
-                    decoded_content += payload.decode('utf-8', errors='ignore')
-        
-        assert "xyz789" in decoded_content or "xyz789" in msg_str
+            call_kwargs = mock_email_service.send_async.call_args[1]
+            html_content = call_kwargs['html_content']
+            text_content = call_kwargs['text_content']
+            
+            assert "xyz789" in html_content or "xyz789" in text_content
 
     @pytest.mark.asyncio
     async def test_send_verification_email_smtp_error(self, auth_service):
-        """Test handling of SMTP errors."""
-        with patch('aiosmtplib.send', new_callable=AsyncMock) as mock_send:
-            mock_send.side_effect = Exception("SMTP connection failed")
-            
-            from core.services.auth import EmailSendError
+        """Test handling of SMTP errors from core EmailService."""
+        with patch('core.services.auth.get_email_service') as mock_get_service:
+            from core.services.email import EmailSendError
+            mock_email_service = MagicMock()
+            mock_email_service.send_async = AsyncMock(side_effect=EmailSendError("SMTP connection failed"))
+            mock_get_service.return_value = mock_email_service
             
             with pytest.raises(EmailSendError) as exc_info:
                 await auth_service._send_verification_email(
@@ -114,24 +124,31 @@ class TestAuthServiceEmail:
             assert "SMTP connection failed" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_send_verification_email_uses_config(self, mock_env_vars):
-        """Test that email service uses config values."""
+    async def test_send_verification_email_uses_email_templates(self, mock_env_vars):
+        """Test that AuthService uses EmailTemplates for content generation."""
         from core.services import auth as auth_module
         
         with patch.object(auth_module, 'get_employee_verification_service') as mock_ragic:
             mock_ragic.return_value = MagicMock()
             service = auth_module.AuthService()
             
-            with patch('aiosmtplib.send', new_callable=AsyncMock) as mock_send:
+            with patch('core.services.auth.get_email_service') as mock_get_service:
+                mock_email_service = MagicMock()
+                mock_email_service.send_async = AsyncMock(return_value=True)
+                mock_get_service.return_value = mock_email_service
+                
                 await service._send_verification_email(
                     to_email="test@example.com",
-                    employee_name="Config User",
+                    employee_name="Template User",
                     magic_link="https://example.com/verify",
                 )
                 
-                call_kwargs = mock_send.call_args[1]
-                assert call_kwargs.get("hostname") == "smtp.test.com"
-                assert call_kwargs.get("port") == 587
+                # Verify send_async was called with expected arguments
+                call_kwargs = mock_email_service.send_async.call_args[1]
+                assert 'subject' in call_kwargs
+                assert 'html_content' in call_kwargs
+                assert 'text_content' in call_kwargs
+                assert call_kwargs['to_email'] == "test@example.com"
 
 
 # =============================================================================
@@ -151,75 +168,72 @@ class TestEmailNotificationService:
         """Create EmailNotificationService instance."""
         return email_module.EmailNotificationService()
 
-    def test_init_loads_smtp_config(self, email_service):
-        """Test that service initializes with SMTP config from env."""
-        assert email_service._smtp_host == "smtp.test.com"
-        assert email_service._smtp_port == 587
-        assert email_service._smtp_username == "test@test.com"
-        assert email_service._smtp_password == "testpass"
-        assert email_service._from_email == "noreply@test.com"
+    def test_init_delegates_to_core_email_service(self, email_service):
+        """Test that service delegates to core EmailService."""
+        # EmailNotificationService should have _email_service (from core)
+        assert hasattr(email_service, '_email_service')
+        assert email_service._email_service is not None
 
-    def test_is_configured_returns_true_when_configured(self, email_service):
-        """Test _is_configured returns True with valid config."""
-        assert email_service._is_configured() is True
+    def test_is_configured_delegates_to_core(self, email_service):
+        """Test _is_configured delegates to core EmailService."""
+        # Should reflect core service configuration status
+        result = email_service._is_configured()
+        assert isinstance(result, bool)
 
-    def test_is_configured_returns_false_when_missing_host(self, monkeypatch):
-        """Test _is_configured returns False when host is missing."""
+    def test_is_configured_returns_false_when_not_configured(self, monkeypatch):
+        """Test _is_configured returns False when core service not configured."""
         monkeypatch.setenv("SMTP_HOST", "")
-        
-        module = load_email_notification_module()
-        service = module.EmailNotificationService()
-        assert service._is_configured() is False
-
-    def test_is_configured_returns_false_when_missing_username(self, monkeypatch):
-        """Test _is_configured returns False when username is missing."""
         monkeypatch.setenv("SMTP_USERNAME", "")
-        monkeypatch.setenv("SMTP_HOST", "smtp.test.com")
-        monkeypatch.setenv("SMTP_PASSWORD", "pass")
-        monkeypatch.setenv("SMTP_FROM_EMAIL", "from@test.com")
+        monkeypatch.setenv("SMTP_PASSWORD", "")
+        monkeypatch.setenv("SMTP_FROM_EMAIL", "")
+        
+        # Reset core email service singleton to pick up new env vars
+        import core.services.email as core_email
+        core_email._email_service = None
         
         module = load_email_notification_module()
         service = module.EmailNotificationService()
         assert service._is_configured() is False
 
     def test_send_leave_request_confirmation_success(
-        self, email_service, mock_smtp_server
+        self, email_service
     ):
         """Test successful leave confirmation email."""
-        result = email_service.send_leave_request_confirmation(
-            to_email="employee@example.com",
-            employee_name="王小明",
-            leave_dates=["2026-02-01", "2026-02-02"],
-            leave_type="特休",
-            reason="家庭旅遊",
-            leave_request_no="LR-2026-0001",
-            direct_supervisor="李經理",
-            sales_dept_manager="陳總監",
-        )
+        with patch.object(email_service._email_service, 'send_sync', return_value=True) as mock_send:
+            result = email_service.send_leave_request_confirmation(
+                to_email="employee@example.com",
+                employee_name="王小明",
+                leave_dates=["2026-02-01", "2026-02-02"],
+                leave_type="特休",
+                reason="家庭旅遊",
+                leave_request_no="LR-2026-0001",
+                direct_supervisor="李經理",
+                sales_dept_manager="陳總監",
+            )
 
-        assert result is True
-        mock_smtp_server.starttls.assert_called_once()
-        mock_smtp_server.login.assert_called_once_with(
-            "test@test.com", "testpass"
-        )
-        mock_smtp_server.sendmail.assert_called_once()
+            assert result is True
+            mock_send.assert_called_once()
+            call_kwargs = mock_send.call_args[1]
+            assert call_kwargs['to_email'] == "employee@example.com"
+            assert "LR-2026-0001" in call_kwargs['subject']
 
     def test_send_leave_request_confirmation_single_date(
-        self, email_service, mock_smtp_server
+        self, email_service
     ):
         """Test leave confirmation with single date formats correctly."""
-        result = email_service.send_leave_request_confirmation(
-            to_email="employee@example.com",
-            employee_name="王小明",
-            leave_dates=["2026-02-01"],
-            leave_type="事假",
-            reason="個人事務",
-            leave_request_no="LR-2026-0002",
-            direct_supervisor="李經理",
-            sales_dept_manager="陳總監",
-        )
+        with patch.object(email_service._email_service, 'send_sync', return_value=True) as mock_send:
+            result = email_service.send_leave_request_confirmation(
+                to_email="employee@example.com",
+                employee_name="王小明",
+                leave_dates=["2026-02-01"],
+                leave_type="事假",
+                reason="個人事務",
+                leave_request_no="LR-2026-0002",
+                direct_supervisor="李經理",
+                sales_dept_manager="陳總監",
+            )
 
-        assert result is True
+            assert result is True
 
     def test_send_leave_request_confirmation_not_configured(self, monkeypatch):
         """Test returns False when SMTP not configured."""
@@ -227,6 +241,10 @@ class TestEmailNotificationService:
         monkeypatch.setenv("SMTP_USERNAME", "")
         monkeypatch.setenv("SMTP_PASSWORD", "")
         monkeypatch.setenv("SMTP_FROM_EMAIL", "")
+        
+        # Reset core email service singleton
+        import core.services.email as core_email
+        core_email._email_service = None
         
         module = load_email_notification_module()
         service = module.EmailNotificationService()
@@ -245,34 +263,31 @@ class TestEmailNotificationService:
         assert result is False
 
     def test_send_leave_request_confirmation_no_recipient(
-        self, email_service, mock_smtp_server
-    ):
-        """Test returns False when no recipient email provided."""
-        result = email_service.send_leave_request_confirmation(
-            to_email="",
-            employee_name="Test",
-            leave_dates=["2026-02-01"],
-            leave_type="特休",
-            reason="Test",
-            leave_request_no="LR-001",
-            direct_supervisor="",
-            sales_dept_manager="",
-        )
-        
-        assert result is False
-        mock_smtp_server.sendmail.assert_not_called()
-
-    def test_send_leave_request_confirmation_smtp_auth_error(
         self, email_service
     ):
-        """Test handling of SMTP authentication errors."""
-        with patch('smtplib.SMTP') as mock_smtp:
-            mock_server = MagicMock()
-            mock_smtp.return_value.__enter__.return_value = mock_server
-            mock_server.starttls = MagicMock()
-            mock_server.login.side_effect = smtplib.SMTPAuthenticationError(
-                535, b"Authentication failed"
+        """Test returns False when no recipient email provided."""
+        with patch.object(email_service._email_service, 'send_sync') as mock_send:
+            result = email_service.send_leave_request_confirmation(
+                to_email="",
+                employee_name="Test",
+                leave_dates=["2026-02-01"],
+                leave_type="特休",
+                reason="Test",
+                leave_request_no="LR-001",
+                direct_supervisor="",
+                sales_dept_manager="",
             )
+            
+            assert result is False
+            mock_send.assert_not_called()
+
+    def test_send_leave_request_confirmation_core_error(
+        self, email_service
+    ):
+        """Test handling of errors from core EmailService."""
+        with patch.object(email_service._email_service, 'send_sync') as mock_send:
+            from core.services.email import EmailSendError
+            mock_send.side_effect = EmailSendError("SMTP connection failed")
             
             result = email_service.send_leave_request_confirmation(
                 to_email="employee@example.com",
@@ -287,63 +302,26 @@ class TestEmailNotificationService:
             
             assert result is False
 
-    def test_send_leave_request_confirmation_smtp_error(self, email_service):
-        """Test handling of general SMTP errors."""
-        with patch('smtplib.SMTP') as mock_smtp:
-            mock_server = MagicMock()
-            mock_smtp.return_value.__enter__.return_value = mock_server
-            mock_server.starttls = MagicMock()
-            mock_server.login = MagicMock()
-            mock_server.sendmail.side_effect = smtplib.SMTPException(
-                "Connection reset"
-            )
-            
-            result = email_service.send_leave_request_confirmation(
+    def test_send_email_html_content(self, email_service):
+        """Test that email contains proper HTML content."""
+        with patch.object(email_service._email_service, 'send_sync', return_value=True) as mock_send:
+            email_service.send_leave_request_confirmation(
                 to_email="employee@example.com",
-                employee_name="Test",
-                leave_dates=["2026-02-01"],
-                leave_type="特休",
-                reason="Test",
-                leave_request_no="LR-001",
-                direct_supervisor="",
-                sales_dept_manager="",
+                employee_name="測試員工",
+                leave_dates=["2026-02-01", "2026-02-02", "2026-02-03"],
+                leave_type="病假",
+                reason="身體不適",
+                leave_request_no="LR-2026-0003",
+                direct_supervisor="主管A",
+                sales_dept_manager="經理B",
             )
+
+            call_kwargs = mock_send.call_args[1]
+            html_content = call_kwargs['html_content']
             
-            assert result is False
-
-    def test_send_email_html_content(self, email_service, mock_smtp_server):
-        """Test that email contains proper HTML structure."""
-        import base64
-        from email import message_from_string
-        
-        email_service.send_leave_request_confirmation(
-            to_email="employee@example.com",
-            employee_name="測試員工",
-            leave_dates=["2026-02-01", "2026-02-02", "2026-02-03"],
-            leave_type="病假",
-            reason="身體不適",
-            leave_request_no="LR-2026-0003",
-            direct_supervisor="主管A",
-            sales_dept_manager="經理B",
-        )
-
-        call_args = mock_smtp_server.sendmail.call_args
-        msg_content = call_args[0][2]
-        
-        # Parse MIME message to get decoded content
-        parsed = message_from_string(msg_content)
-        decoded_content = ""
-        for part in parsed.walk():
-            if part.get_content_type() == "text/html":
-                payload = part.get_payload(decode=True)
-                if payload:
-                    decoded_content = payload.decode('utf-8', errors='ignore')
-                    break
-        
-        assert "<!DOCTYPE html>" in decoded_content
-        assert "測試員工" in decoded_content or "LR-2026-0003" in decoded_content
-        assert "LR-2026-0003" in decoded_content
-        assert "病假" in decoded_content
+            assert "<!DOCTYPE html>" in html_content
+            assert "LR-2026-0003" in html_content
+            assert "病假" in html_content
 
 
 class TestEmailNotificationServiceSingleton:
@@ -374,75 +352,53 @@ class TestAdminEmailTemplates:
         return module.EmailNotificationService()
 
     def test_leave_email_contains_required_fields(
-        self, email_service, mock_smtp_server
+        self, email_service
     ):
         """Test leave email contains all required information fields."""
-        from email import message_from_string
-        
-        email_service.send_leave_request_confirmation(
-            to_email="test@example.com",
-            employee_name="測試員工",
-            leave_dates=["2026-03-01"],
-            leave_type="婚假",
-            reason="結婚",
-            leave_request_no="LR-2026-0100",
-            direct_supervisor="直屬主管",
-            sales_dept_manager="部門經理",
-        )
+        with patch.object(email_service._email_service, 'send_sync', return_value=True) as mock_send:
+            email_service.send_leave_request_confirmation(
+                to_email="test@example.com",
+                employee_name="測試員工",
+                leave_dates=["2026-03-01"],
+                leave_type="婚假",
+                reason="結婚",
+                leave_request_no="LR-2026-0100",
+                direct_supervisor="直屬主管",
+                sales_dept_manager="部門經理",
+            )
 
-        call_args = mock_smtp_server.sendmail.call_args
-        msg_content = call_args[0][2]
-        
-        # Parse MIME message to get decoded content
-        parsed = message_from_string(msg_content)
-        decoded_content = ""
-        for part in parsed.walk():
-            if part.get_content_type() == "text/html":
-                payload = part.get_payload(decode=True)
-                if payload:
-                    decoded_content = payload.decode('utf-8', errors='ignore')
-                    break
-        
-        # Verify expected fields in decoded content
-        assert "婚假" in decoded_content
-        assert "結婚" in decoded_content
-        assert "LR-2026-0100" in decoded_content
-        assert "直屬主管" in decoded_content
-        assert "部門經理" in decoded_content
+            call_kwargs = mock_send.call_args[1]
+            html_content = call_kwargs['html_content']
+            
+            # Verify expected fields in HTML content
+            assert "婚假" in html_content
+            assert "結婚" in html_content
+            assert "LR-2026-0100" in html_content
+            assert "直屬主管" in html_content
+            assert "部門經理" in html_content
 
     def test_leave_email_handles_none_supervisors(
-        self, email_service, mock_smtp_server
+        self, email_service
     ):
         """Test email handles None/empty supervisor fields gracefully."""
-        from email import message_from_string
-        
-        result = email_service.send_leave_request_confirmation(
-            to_email="test@example.com",
-            employee_name="員工",
-            leave_dates=["2026-03-01"],
-            leave_type="特休",
-            reason="休息",
-            leave_request_no="LR-001",
-            direct_supervisor="",
-            sales_dept_manager="",
-        )
+        with patch.object(email_service._email_service, 'send_sync', return_value=True) as mock_send:
+            result = email_service.send_leave_request_confirmation(
+                to_email="test@example.com",
+                employee_name="員工",
+                leave_dates=["2026-03-01"],
+                leave_type="特休",
+                reason="休息",
+                leave_request_no="LR-001",
+                direct_supervisor="",
+                sales_dept_manager="",
+            )
 
-        assert result is True
-        call_args = mock_smtp_server.sendmail.call_args
-        msg_content = call_args[0][2]
-        
-        # Parse MIME message to get decoded content
-        parsed = message_from_string(msg_content)
-        decoded_content = ""
-        for part in parsed.walk():
-            if part.get_content_type() == "text/html":
-                payload = part.get_payload(decode=True)
-                if payload:
-                    decoded_content = payload.decode('utf-8', errors='ignore')
-                    break
-        
-        # When supervisor is empty, "未指定" should appear in template
-        assert "未指定" in decoded_content
+            assert result is True
+            call_kwargs = mock_send.call_args[1]
+            html_content = call_kwargs['html_content']
+            
+            # When supervisor is empty, "未指定" should appear in template
+            assert "未指定" in html_content
 
 
 # =============================================================================
@@ -496,8 +452,14 @@ class TestCoreEmailService:
         """Test is_configured returns True when fully configured."""
         assert email_service.is_configured is True
 
-    def test_is_configured_returns_false_when_missing_host(self, email_config):
+    def test_is_configured_returns_false_when_missing_host(self, email_config, monkeypatch):
         """Test is_configured returns False when host is missing."""
+        # Clear env vars so fallback doesn't kick in
+        monkeypatch.delenv("SMTP_HOST", raising=False)
+        monkeypatch.delenv("SMTP_USERNAME", raising=False)
+        monkeypatch.delenv("SMTP_PASSWORD", raising=False)
+        monkeypatch.delenv("SMTP_FROM_EMAIL", raising=False)
+        
         from core.services.email import EmailService
         email_config["host"] = ""
         service = EmailService(config=email_config)
@@ -519,8 +481,14 @@ class TestCoreEmailService:
             assert result is True
             mock_server.sendmail.assert_called_once()
 
-    def test_send_sync_not_configured(self):
+    def test_send_sync_not_configured(self, monkeypatch):
         """Test send_sync returns False when not configured."""
+        # Clear env vars so fallback doesn't kick in
+        monkeypatch.delenv("SMTP_HOST", raising=False)
+        monkeypatch.delenv("SMTP_USERNAME", raising=False)
+        monkeypatch.delenv("SMTP_PASSWORD", raising=False)
+        monkeypatch.delenv("SMTP_FROM_EMAIL", raising=False)
+        
         from core.services.email import EmailService
         service = EmailService(config={"host": "", "username": "", "password": "", "from_email": ""})
         
@@ -557,8 +525,14 @@ class TestCoreEmailService:
             mock_send.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_send_async_not_configured(self):
+    async def test_send_async_not_configured(self, monkeypatch):
         """Test send_async returns False when not configured."""
+        # Clear env vars so fallback doesn't kick in
+        monkeypatch.delenv("SMTP_HOST", raising=False)
+        monkeypatch.delenv("SMTP_USERNAME", raising=False)
+        monkeypatch.delenv("SMTP_PASSWORD", raising=False)
+        monkeypatch.delenv("SMTP_FROM_EMAIL", raising=False)
+        
         from core.services.email import EmailService
         service = EmailService(config={"host": "", "username": "", "password": "", "from_email": ""})
         

@@ -121,7 +121,7 @@ graph TD
             Router{Webhook Router}
             
             Router -->|source=core_user| UserSync[User Sync Service]
-            Router -->|source=chatbot| SopSync[SOP Sync Service]
+            Router -->|source=chatbot_sop| SopSync[SOP Sync Service]
             Router -->|path=/webhook/line/chatbot| ChatbotMod[Chatbot Module]
             Router -->|path=/webhook/line/admin| AdminMod[Admin Module]
         end

@@ -323,7 +323,46 @@ async def _handle_follow_event(self, user_id: str, reply_token: str | None) -> N
 
 ---
 
-### 8. 前端開發 (Front-End Development)
+### 8. Email 發送 (Email Sending)
+
+模組只需關注業務內容，發送邏輯完全由框架接管。
+
+#### 8.1 基本用法
+
+```python
+from core.services.email import get_email_service, EmailTemplates
+
+async def notify_user(email: str, name: str):
+    email_service = get_email_service()
+    
+    # 1. 使用模板生成內容
+    subject, html, text = EmailTemplates.general_notification(
+        title="通知標題",
+        content=f"親愛的 {name}，您的申請已通過。",
+        action_url="https://...",
+        action_text="查看詳情"
+    )
+    
+    # 2. 發送郵件 (Async for Routes)
+    await email_service.send_async(
+        to_email=email,
+        subject=subject,
+        html_content=html,
+        text_content=text
+    )
+```
+
+#### 8.2 新增郵件模板
+
+若現有模板不敷使用，請修改 `core/services/email.py` 的 `EmailTemplates` 類別，**不要**在模組內硬編碼 HTML。
+
+1. 修改 `core/services/email.py` 新增靜態方法
+2. 使用統一的 CSS 樣式與 Layout
+3. 在模組中呼叫
+
+---
+
+### 9. 前端開發 (Front-End Development)
 
 若模組包含前端頁面（如 LIFF 表單），請遵循以下規範以確保體驗一致性：
 
@@ -346,3 +385,6 @@ A: 這是因為在不同 Thread 共用 Session。請確保背景任務使用 `ge
 
 **Q: 我需要 Redis 怎麼辦？**
 A: 目前框架尚未內建 Redis。若有強烈需求，請聯繫架構組評估加入 `core.services`。
+
+**Q: 為什麼不能自己用 `smtplib`？**
+A: 為了統一管理 SMTP 設定、確保安全性（不將密碼散落在各處）以及維持一致的郵件風格，必須使用 `core.services.email`。

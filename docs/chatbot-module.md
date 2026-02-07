@@ -38,7 +38,9 @@ modules/chatbot/
 │   ├── __init__.py          # 匯出所有 services
 │   ├── json_import_service.py  # JSON 匯入 SOP
 │   ├── line_service.py      # LINE Messaging API
+│   ├── ragic_sync.py        # Ragic 同步服務
 │   └── vector_service.py    # 向量嵌入與搜尋
+├── utils/                   # 工具函式
 ├── data/
 │   └── sop_samples.json     # SOP 範例資料
 └── tests/
