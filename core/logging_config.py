@@ -123,8 +123,15 @@ def setup_logging(log_level: int = logging.INFO) -> None:
 
     Args:
         log_level: The logging level (default: logging.INFO).
+    
+    In Docker containers (detected via /.dockerenv), only console logging is used
+    since Docker automatically captures stdout. In non-container environments,
+    both file and console logging are enabled.
     """
+    import os
+    
     log_file_path = get_log_path()
+    is_docker = os.path.exists("/.dockerenv")
 
     # Create root logger
     root_logger = logging.getLogger()
@@ -136,16 +143,17 @@ def setup_logging(log_level: int = logging.INFO) -> None:
     # Formatter with sensitive data masking
     formatter = SensitiveDataFormatter(LOG_FORMAT, datefmt=DATE_FORMAT)
 
-    # --- File Handler (Rotating) ---
-    file_handler = RotatingFileHandler(
-        filename=str(log_file_path),
-        maxBytes=MAX_BYTES,
-        backupCount=BACKUP_COUNT,
-        encoding="utf-8",
-    )
-    file_handler.setLevel(log_level)
-    file_handler.setFormatter(formatter)
-    root_logger.addHandler(file_handler)
+    # --- File Handler (Rotating) - Only in non-Docker environments ---
+    if not is_docker:
+        file_handler = RotatingFileHandler(
+            filename=str(log_file_path),
+            maxBytes=MAX_BYTES,
+            backupCount=BACKUP_COUNT,
+            encoding="utf-8",
+        )
+        file_handler.setLevel(log_level)
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
 
     # --- Console Handler ---
     console_handler = logging.StreamHandler(sys.stdout)
@@ -154,7 +162,10 @@ def setup_logging(log_level: int = logging.INFO) -> None:
     root_logger.addHandler(console_handler)
 
     # Log initialization
-    root_logger.info(f"Logging initialized. Log file: {log_file_path}")
+    if is_docker:
+        root_logger.info("Logging initialized (Docker mode - console only)")
+    else:
+        root_logger.info(f"Logging initialized. Log file: {log_file_path}")
 
     # Suppress noisy loggers
     logging.getLogger("watchfiles.main").setLevel(logging.WARNING)
