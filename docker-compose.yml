@@ -17,6 +17,7 @@ services:
     ports:
       - "5432:5432"
     environment:
+      TZ: Asia/Taipei
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: hsib_sop_bot
@@ -56,6 +57,7 @@ services:
     ports:
       - "8000:8000"
     environment:
+      - TZ=Asia/Taipei
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/hsib_sop_bot
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8000
@@ -74,6 +76,7 @@ services:
     image: cloudflare/cloudflared:latest
     container_name: hsib-cloudflared
     environment:
+      - TZ=Asia/Taipei
       - TUNNEL_TOKEN=${TUNNEL_TOKEN}
     command: tunnel --no-autoupdate run
     restart: unless-stopped
@@ -89,6 +92,7 @@ services:
     ports:
       - "5050:80"
     environment:
+      TZ: Asia/Taipei
       PGADMIN_DEFAULT_EMAIL: admin@example.com
       PGADMIN_DEFAULT_PASSWORD: admin
     volumes:
