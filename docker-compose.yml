@@ -18,9 +18,9 @@ services:
       - "5432:5432"
     environment:
       TZ: Asia/Taipei
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: hsib_sop_bot
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-hsib_sop_bot}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
@@ -58,7 +58,7 @@ services:
       - "8000:8000"
     environment:
       - TZ=Asia/Taipei
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/hsib_sop_bot
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-hsib_sop_bot}
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8000
     env_file:
@@ -93,8 +93,8 @@ services:
       - "5050:80"
     environment:
       TZ: Asia/Taipei
-      PGADMIN_DEFAULT_EMAIL: admin@example.com
-      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@localhost}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:?PGADMIN_PASSWORD is required for pgadmin}
     volumes:
       - pgadmin_data:/var/lib/pgadmin
     depends_on:

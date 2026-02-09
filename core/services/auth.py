@@ -829,7 +829,7 @@ class AuthService:
                 password=smtp_pass,
             )
 
-            logger.info(f"Email sent to: {to_email}")
+            logger.info(f"Email sent to: {self._mask_email(to_email)}")
 
         except Exception as e:
             logger.error(f"Email send error: {e}")

@@ -375,6 +375,12 @@ def _handle_auth_failure(
             detail="Missing webhook signature",
             headers={"WWW-Authenticate": "Signature"},
         )
+    elif auth_context.result == WebhookAuthResult.REPLAY_EXPIRED:
+        # Replay attack detected - timestamp too old
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Request expired (possible replay attack)",
+        )
     else:
         # Invalid credentials - 403 Forbidden
         raise HTTPException(

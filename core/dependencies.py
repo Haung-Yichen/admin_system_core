@@ -39,6 +39,8 @@ from core.security.webhook import (
     WebhookAuthResult,
     WebhookSecurityService,
     get_webhook_security_service,
+    VerifierType,
+    get_verifier_factory,
 )
 
 if TYPE_CHECKING:
@@ -446,8 +448,10 @@ async def verify_webhook_signature(
     """
     FastAPI dependency that verifies webhook signatures.
     
-    This dependency reads the raw request body and verifies it against
-    either the X-Hub-Signature-256 header or URL token parameter.
+    This dependency intelligently selects the appropriate verifier strategy:
+    - If x-line-signature header exists OR source is "line", use LINE_HMAC.
+    - If source is "ragic", use RAGIC_RSA.
+    - Default to HMAC_SHA256 for other sources.
     
     Args:
         request: FastAPI request object
@@ -460,23 +464,27 @@ async def verify_webhook_signature(
     Raises:
         HTTPException: 401 if signature is missing, 403 if invalid
     """
-    security_service = get_webhook_security_service()
     client_ip = _get_client_ip(request)
     
-    # Get raw request body for signature verification
-    body = await request.body()
+    # Determine the appropriate verifier strategy
+    line_signature_header = request.headers.get("x-line-signature")
     
-    # Get signature header
-    signature_header = request.headers.get("X-Hub-Signature-256")
+    if line_signature_header or source.lower() == "line":
+        # LINE webhook: use LINE HMAC verifier
+        verifier_type = VerifierType.LINE_HMAC
+    elif source.lower() == "ragic":
+        # Ragic webhook: use RSA verifier
+        verifier_type = VerifierType.RAGIC_RSA
+    else:
+        # Default: use HMAC-SHA256 (GitHub/Stripe style)
+        verifier_type = VerifierType.HMAC_SHA256
     
-    # Authenticate the request
-    auth_context = security_service.authenticate_request(
-        payload=body,
-        signature_header=signature_header,
-        url_token=token,
-        source=source,
-        client_ip=client_ip,
-    )
+    # Get the appropriate verifier from factory
+    factory = get_verifier_factory()
+    verifier = factory.get_verifier(verifier_type)
+    
+    # Verify the webhook using the selected strategy
+    auth_context = await verifier.verify(request)
     
     # Handle authentication failures
     if not auth_context.verified:
@@ -484,9 +492,10 @@ async def verify_webhook_signature(
         _webhook_logger.warning(
             f"Webhook authentication failed: "
             f"source={source}, "
+            f"verifier={verifier_type.value}, "
             f"result={auth_context.result.value}, "
             f"ip={client_ip}, "
-            f"has_signature_header={bool(signature_header)}, "
+            f"has_line_signature={bool(line_signature_header)}, "
             f"has_url_token={bool(token)}"
         )
         
@@ -497,6 +506,12 @@ async def verify_webhook_signature(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Webhook not properly configured",
             )
+        elif auth_context.result == WebhookAuthResult.PUBLIC_KEY_NOT_FOUND:
+            # Server configuration error - 500
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Webhook verification key not configured",
+            )
         elif auth_context.result in (
             WebhookAuthResult.MISSING_SIGNATURE,
             WebhookAuthResult.MISSING_TOKEN,
@@ -505,7 +520,7 @@ async def verify_webhook_signature(
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Missing webhook signature or token",
-                headers={"WWW-Authenticate": "X-Hub-Signature-256"},
+                headers={"WWW-Authenticate": "X-Hub-Signature-256, x-line-signature"},
             )
         else:
             # Invalid credentials - 403 Forbidden

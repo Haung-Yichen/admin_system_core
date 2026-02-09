@@ -45,11 +45,36 @@ class TokenInvalidError(TokenError):
     pass
 
 
+class TokenConfigurationError(TokenError):
+    """Raised when JWT configuration is invalid or insecure."""
+    pass
+
+
+# Minimum length for JWT secret key (32 bytes = 256 bits, minimum for HS256)
+JWT_SECRET_MIN_LENGTH = 32
+
+
 def _get_security_config() -> dict[str, Any]:
-    """Helper to load security config."""
+    """
+    Helper to load security config with validation.
+    
+    Raises:
+        TokenConfigurationError: If JWT secret key is too short.
+    """
     loader = ConfigLoader()
     loader.load()
-    return loader.get("security", {})
+    config = loader.get("security", {})
+    
+    # Validate JWT secret key length for security
+    jwt_secret = config.get("jwt_secret_key", "")
+    if len(jwt_secret) < JWT_SECRET_MIN_LENGTH:
+        raise TokenConfigurationError(
+            f"JWT_SECRET_KEY must be at least {JWT_SECRET_MIN_LENGTH} characters. "
+            f"Current length: {len(jwt_secret)}. "
+            f"Generate a secure key with: openssl rand -hex 32"
+        )
+    
+    return config
 
 
 def create_magic_link_token(email: str, line_sub: str) -> str:

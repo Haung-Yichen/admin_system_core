@@ -52,6 +52,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_RAGIC_PUBLIC_KEY_PATH = Path("resources/certs/ragic_public_key.pem")
 
+# Replay Attack Protection: Reject requests older than this many seconds
+TIMESTAMP_TOLERANCE_SECONDS = 300  # 5 minutes
+
+
 
 # =============================================================================
 # Enums & Data Classes
@@ -61,6 +65,7 @@ class VerifierType(str, Enum):
     """Supported webhook verification strategies."""
     HMAC_SHA256 = "hmac_sha256"
     RAGIC_RSA = "ragic_rsa"
+    LINE_HMAC = "line_hmac"
 
 
 class WebhookAuthResult(Enum):
@@ -73,6 +78,8 @@ class WebhookAuthResult(Enum):
     SECRET_NOT_CONFIGURED = "secret_not_configured"
     PUBLIC_KEY_NOT_FOUND = "public_key_not_found"
     INVALID_PAYLOAD = "invalid_payload"
+    REPLAY_EXPIRED = "replay_expired"  # Timestamp too old (possible replay attack)
+
 
 
 @dataclass
@@ -275,6 +282,36 @@ class HmacVerifier(IWebhookVerifier):
         
         # Verify signature
         if self._verify_signature(payload, signature_header, secret_key):
+            # === Replay Attack Protection ===
+            # Check timestamp header if present to prevent replay attacks
+            timestamp_header = request.headers.get("X-Timestamp")
+            if timestamp_header:
+                try:
+                    import time
+                    request_time = int(timestamp_header)
+                    current_time = int(time.time())
+                    time_diff = abs(current_time - request_time)
+                    
+                    if time_diff > TIMESTAMP_TOLERANCE_SECONDS:
+                        logger.warning(
+                            f"HMAC verification failed: Timestamp too old (possible replay attack). "
+                            f"source={source}, ip={client_ip}, "
+                            f"request_time={request_time}, current_time={current_time}, "
+                            f"diff={time_diff}s, tolerance={TIMESTAMP_TOLERANCE_SECONDS}s"
+                        )
+                        return WebhookAuthContext(
+                            verified=False,
+                            result=WebhookAuthResult.REPLAY_EXPIRED,
+                            source=source,
+                            client_ip=client_ip,
+                            error_message=f"Request timestamp too old ({time_diff}s > {TIMESTAMP_TOLERANCE_SECONDS}s)",
+                        )
+                except (ValueError, TypeError):
+                    # Invalid timestamp format - log but continue (backward compatibility)
+                    logger.debug(
+                        f"Invalid timestamp format in X-Timestamp header: {timestamp_header}"
+                    )
+            
             logger.debug(
                 f"HMAC verification successful. source={source}, ip={client_ip}"
             )
@@ -678,6 +715,227 @@ class RagicRSAVerifier(IWebhookVerifier):
 
 
 # =============================================================================
+# LINE HMAC Verifier Implementation
+# =============================================================================
+
+class LineVerifier(IWebhookVerifier):
+    """
+    LINE Messaging API webhook signature verifier.
+    
+    Validates webhooks using the x-line-signature header,
+    which contains a Base64-encoded HMAC-SHA256 signature.
+    
+    LINE Webhook Signature Formula:
+        signature == Base64(HMAC-SHA256(ChannelSecret, RequestBody))
+    
+    Security Features:
+        - Constant-time comparison to prevent timing attacks
+        - Base64 encoded signature (LINE standard)
+    
+    Attributes:
+        SIGNATURE_HEADER: The HTTP header containing the signature.
+    """
+    
+    SIGNATURE_HEADER = "x-line-signature"
+    
+    def __init__(self, default_secret: Optional[str] = None) -> None:
+        """
+        Initialize the LINE verifier.
+        
+        Args:
+            default_secret: Default LINE Channel Secret for verification.
+                           If not provided, must be passed to verify() or
+                           configured via environment.
+        """
+        self._default_secret = default_secret
+        self._config = get_configuration_provider()
+    
+    def get_verifier_type(self) -> VerifierType:
+        """Get the verifier type identifier."""
+        return VerifierType.LINE_HMAC
+    
+    async def verify(
+        self,
+        request: Request,
+        secret: Optional[str] = None,
+    ) -> WebhookAuthContext:
+        """
+        Verify LINE webhook signature from request header.
+        
+        Args:
+            request: The FastAPI Request object.
+            secret: The LINE Channel Secret. Falls back to default if not provided.
+        
+        Returns:
+            WebhookAuthContext: Authentication result with verification status.
+        """
+        client_ip = self._get_client_ip(request)
+        source = request.query_params.get("source", "line")
+        
+        # Determine secret to use
+        secret_key = secret or self._default_secret
+        if not secret_key:
+            secret_key = self._get_line_channel_secret()
+        
+        if not secret_key:
+            logger.warning(
+                f"LINE verification failed: No channel secret configured. "
+                f"source={source}, ip={client_ip}"
+            )
+            return WebhookAuthContext(
+                verified=False,
+                result=WebhookAuthResult.SECRET_NOT_CONFIGURED,
+                source=source,
+                client_ip=client_ip,
+                error_message="LINE Channel Secret not configured",
+            )
+        
+        # Get signature from header (case-insensitive)
+        signature_header = request.headers.get(self.SIGNATURE_HEADER)
+        if not signature_header:
+            logger.warning(
+                f"LINE verification failed: Missing signature header. "
+                f"source={source}, ip={client_ip}"
+            )
+            return WebhookAuthContext(
+                verified=False,
+                result=WebhookAuthResult.MISSING_SIGNATURE,
+                source=source,
+                client_ip=client_ip,
+                error_message=f"Missing {self.SIGNATURE_HEADER} header",
+            )
+        
+        # Get request body
+        try:
+            payload = await request.body()
+        except Exception as e:
+            logger.error(
+                f"LINE verification failed: Could not read request body. "
+                f"source={source}, ip={client_ip}, error={e}"
+            )
+            return WebhookAuthContext(
+                verified=False,
+                result=WebhookAuthResult.INVALID_PAYLOAD,
+                source=source,
+                client_ip=client_ip,
+                error_message="Failed to read request body",
+            )
+        
+        # Verify signature
+        if self._verify_signature(payload, signature_header, secret_key):
+            logger.debug(
+                f"LINE verification successful. source={source}, ip={client_ip}"
+            )
+            return WebhookAuthContext(
+                verified=True,
+                result=WebhookAuthResult.SUCCESS,
+                source=source,
+                client_ip=client_ip,
+            )
+        else:
+            logger.warning(
+                f"LINE verification failed: Invalid signature. "
+                f"source={source}, ip={client_ip}"
+            )
+            return WebhookAuthContext(
+                verified=False,
+                result=WebhookAuthResult.INVALID_SIGNATURE,
+                source=source,
+                client_ip=client_ip,
+                error_message="Invalid LINE signature",
+            )
+    
+    def _verify_signature(
+        self,
+        payload: bytes,
+        signature: str,
+        secret_key: str,
+    ) -> bool:
+        """
+        Verify LINE HMAC-SHA256 signature using constant-time comparison.
+        
+        LINE uses Base64-encoded HMAC-SHA256 signature:
+            signature == Base64(HMAC-SHA256(ChannelSecret, Body))
+        
+        Args:
+            payload: The raw request body bytes.
+            signature: The Base64-encoded signature from header.
+            secret_key: The LINE Channel Secret.
+        
+        Returns:
+            bool: True if signature is valid, False otherwise.
+        """
+        if not payload or not signature or not secret_key:
+            return False
+        
+        try:
+            # Compute expected signature (Base64 encoded)
+            expected_signature = base64.b64encode(
+                hmac.new(
+                    key=secret_key.encode("utf-8"),
+                    msg=payload,
+                    digestmod=hashlib.sha256,
+                ).digest()
+            ).decode("utf-8")
+            
+            # Use constant-time comparison to prevent timing attacks
+            return secrets.compare_digest(signature, expected_signature)
+        except Exception as e:
+            logger.error(f"LINE signature verification error: {e}")
+            return False
+    
+    def generate_signature(self, payload: bytes, secret_key: str) -> str:
+        """
+        Generate LINE HMAC-SHA256 signature for payload.
+        
+        Useful for testing or when sending webhooks to other services.
+        
+        Args:
+            payload: The request body bytes.
+            secret_key: The LINE Channel Secret.
+        
+        Returns:
+            str: The Base64-encoded signature.
+        """
+        signature = hmac.new(
+            key=secret_key.encode("utf-8"),
+            msg=payload,
+            digestmod=hashlib.sha256,
+        ).digest()
+        return base64.b64encode(signature).decode("utf-8")
+    
+    def _get_line_channel_secret(self) -> Optional[str]:
+        """
+        Get the LINE Channel Secret from configuration.
+        
+        Returns:
+            Optional[str]: The channel secret or None if not configured.
+        """
+        # Try LINE-specific config first
+        channel_secret = self._config.get("line.channel_secret")
+        if channel_secret:
+            return channel_secret
+        
+        # Fall back to webhook-specific secret
+        return self._config.get("webhook.secrets.line")
+    
+    def _get_client_ip(self, request: Request) -> str:
+        """
+        Extract client IP from request.
+        
+        Args:
+            request: The FastAPI Request object.
+        
+        Returns:
+            str: The client IP address.
+        """
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            return forwarded_for.split(",")[0].strip()
+        return request.client.host if request.client else "unknown"
+
+
+# =============================================================================
 # Verifier Factory
 # =============================================================================
 
@@ -703,6 +961,7 @@ class WebhookVerifierFactory:
         """Register the default verifier implementations."""
         self._verifiers[VerifierType.HMAC_SHA256] = HmacVerifier()
         self._verifiers[VerifierType.RAGIC_RSA] = RagicRSAVerifier()
+        self._verifiers[VerifierType.LINE_HMAC] = LineVerifier()
     
     def get_verifier(self, verifier_type: VerifierType) -> IWebhookVerifier:
         """

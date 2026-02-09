@@ -107,8 +107,8 @@ def create_base_app(
     @app.middleware("http")
     async def add_security_headers(request: Request, call_next):
         response = await call_next(request)
-        # Prevent clickjacking
-        response.headers["X-Frame-Options"] = "DENY"
+        # Note: X-Frame-Options removed - using CSP frame-ancestors instead
+        # (CSP is more flexible and supports multiple domains for LIFF)
         # Prevent MIME type sniffing
         response.headers["X-Content-Type-Options"] = "nosniff"
         # Enable XSS filter (legacy browsers)
@@ -120,6 +120,33 @@ def create_base_app(
         # HSTS (via Cloudflare, but add as backup)
         if request.url.scheme == "https":
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        
+        # Content Security Policy (CSP) - TEMPORARILY DISABLED FOR LIFF DEBUGGING
+        # TODO: Re-enable after confirming LIFF works
+        # Note: 'unsafe-inline' needed for LIFF SDK compatibility
+        # csp_directives = [
+        #     "default-src 'self'",
+        #     # Scripts: self + LINE LIFF SDK
+        #     "script-src 'self' 'unsafe-inline' https://static.line-scdn.net",
+        #     # Styles: self + inline (needed for some LIFF features)
+        #     "style-src 'self' 'unsafe-inline'",
+        #     # Images: self + data URIs + HTTPS (for LINE avatars)
+        #     "img-src 'self' data: https:",
+        #     # Connect: self + LINE APIs
+        #     "connect-src 'self' https://api.line.me https://liff.line.me https://access.line.me",
+        #     # Fonts: self + Google Fonts (if used)
+        #     "font-src 'self' https://fonts.gstatic.com",
+        #     # Frames: Allow LINE LIFF authorization flow
+        #     "frame-src 'self' https://liff.line.me https://access.line.me",
+        #     # Frame ancestors: Allow LINE to embed this page (LIFF runs inside LINE app)
+        #     "frame-ancestors 'self' https://liff.line.me https://line.me",
+        #     # Only allow forms to submit to self and LINE
+        #     "form-action 'self' https://access.line.me",
+        #     # Upgrade insecure requests in production
+        #     "upgrade-insecure-requests",
+        # ]
+        # response.headers["Content-Security-Policy"] = "; ".join(csp_directives)
+        
         return response
 
     # Register core routes
