@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard | Admin System Core</title>
+    <meta name="description" content="Admin System Core - Management Dashboard">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        sidebar: '#1e293b',
+                        'sidebar-hover': '#334155',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Inter Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <style>
+        * {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .animate-fade-in {
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes pulse-slow {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        .animate-pulse-slow {
+            animation: pulse-slow 2s ease-in-out infinite;
+        }
+
+        .card-hover {
+            transition: all 0.2s ease;
+        }
+
+        .card-hover:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+        }
+    </style>
+</head>
+
+<body class="bg-gray-50 min-h-screen" x-data="dashboardApp()" x-init="init()">
+
+    <div class="flex h-screen overflow-hidden">
+        <!-- Sidebar -->
+        <aside class="w-64 bg-sidebar flex flex-col flex-shrink-0">
+            <!-- Logo -->
+            <div class="h-16 flex items-center px-6 border-b border-slate-700">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
+                        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                        </svg>
+                    </div>
+                    <span class="text-white font-semibold">Admin System</span>
+                </div>
+            </div>
+
+            <!-- Navigation -->
+            <nav class="flex-1 px-3 py-4 space-y-1">
+                <a href="#" @click.prevent="currentPage = 'dashboard'"
+                    :class="currentPage === 'dashboard' ? 'bg-sidebar-hover text-white' : 'text-slate-400 hover:text-white hover:bg-sidebar-hover'"
+                    class="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                    </svg>
+                    <span class="font-medium">儀表板</span>
+                </a>
+
+                <a href="#" @click.prevent="currentPage = 'logs'"
+                    :class="currentPage === 'logs' ? 'bg-sidebar-hover text-white' : 'text-slate-400 hover:text-white hover:bg-sidebar-hover'"
+                    class="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <span class="font-medium">事件日誌</span>
+                </a>
+
+                <a href="#" @click.prevent="currentPage = 'modules'"
+                    :class="currentPage === 'modules' ? 'bg-sidebar-hover text-white' : 'text-slate-400 hover:text-white hover:bg-sidebar-hover'"
+                    class="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                    </svg>
+                    <span class="font-medium">模組管理</span>
+                </a>
+            </nav>
+
+            <!-- User Info -->
+            <div class="p-3 border-t border-slate-700">
+                <div class="flex items-center gap-3 px-3 py-2">
+                    <div class="w-8 h-8 bg-slate-600 rounded-full flex items-center justify-center">
+                        <span class="text-white text-sm font-medium"
+                            x-text="user?.username?.charAt(0).toUpperCase() || 'A'"></span>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-white text-sm font-medium truncate" x-text="user?.username || 'Admin'"></p>
+                        <p class="text-slate-400 text-xs">Administrator</p>
+                    </div>
+                    <button @click="logout" class="text-slate-400 hover:text-white transition-colors" title="Logout">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 overflow-y-auto scrollbar-thin">
+            <!-- Header -->
+            <header
+                class="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 sticky top-0 z-10">
+                <div class="flex items-center gap-4">
+                    <h1 class="text-xl font-semibold text-gray-900" x-text="pageTitle"></h1>
+                    <div x-show="isRefreshing" class="mt-1">
+                        <svg class="animate-spin h-4 w-4 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4">
+                    <span class="text-sm text-gray-500" x-text="currentTime"></span>
+                    <div class="flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full"
+                            :class="serverStatus?.running ? 'bg-green-500' : 'bg-red-500'"></span>
+                        <span class="text-sm" :class="serverStatus?.running ? 'text-green-600' : 'text-red-600'"
+                            x-text="serverStatus?.running ? 'Online' : 'Offline'"></span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Page Content -->
+            <div class="p-6">
+                <!-- Dashboard Page -->
+                <div x-show="currentPage === 'dashboard'" x-transition class="animate-fade-in">
+                    <!-- System Health Section -->
+                    <h2 class="text-lg font-semibold text-gray-900 mb-4">系統健康 System Health</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                        <!-- Server Status -->
+                        <div class="bg-white rounded-xl p-6 border border-gray-100 card-hover">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="w-12 h-12 bg-green-50 rounded-xl flex items-center justify-center">
+                                    <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor"
+                                        viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+                                    </svg>
+                                </div>
+                                <span class="text-xs font-medium px-2 py-1 rounded-full"
+                                    :class="serverStatus?.running ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'"
+                                    x-text="serverStatus?.running ? 'Running' : 'Stopped'"></span>
+                            </div>
+                            <h3 class="text-2xl font-bold text-gray-900"
+                                x-text="'Port ' + (serverStatus?.port || '8000')"></h3>
+                            <p class="text-gray-500 text-sm mt-1">Server Status</p>
+                        </div>
+
+                        <!-- Uptime -->
+                        <div class="bg-white rounded-xl p-6 border border-gray-100 card-hover">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center">
+                                    <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor"
+                                        viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                </div>
+                            </div>
+                            <h3 class="text-2xl font-bold text-gray-900"
+                                x-text="formatUptime(serverStatus?.uptime_seconds)"></h3>
+                            <p class="text-gray-500 text-sm mt-1">Uptime</p>
+                        </div>
+
+                        <!-- Core Services (Ragic, LINE) -->
+                        <template x-for="service in coreServices" :key="service.name">
+                            <div class="bg-white rounded-xl p-6 border border-gray-100 card-hover">
+                                <div class="flex items-center justify-between mb-4">
+                                    <div class="w-12 h-12 rounded-xl flex items-center justify-center"
+                                        :class="getStatusBgColor(service.status)">
+                                        <!-- Database/API Icon for Ragic -->
+                                        <svg x-show="service.name === 'Ragic'" class="w-6 h-6" :class="getStatusTextColor(service.status)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+                                        </svg>
+                                        <!-- Chat Icon for LINE Bot -->
+                                        <svg x-show="service.name === 'LINE Bot'" class="w-6 h-6" :class="getStatusTextColor(service.status)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                                        </svg>
+                                    </div>
+                                    <span class="text-xs font-medium px-2 py-1 rounded-full"
+                                        :class="getStatusBadgeClass(service.status)"
+                                        x-text="service.message || service.status"></span>
+                                </div>
+                                <h3 class="text-xl font-bold text-gray-900" x-text="service.name"></h3>
+                                <p class="text-gray-500 text-sm mt-1" x-text="getFirstDetail(service.details)"></p>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- Business Modules Section -->
+                    <h2 class="text-lg font-semibold text-gray-900 mb-4">業務模組 Business Modules</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+                        <template x-for="module in modules" :key="module.name">
+                            <div class="bg-white rounded-xl p-6 border border-gray-100 card-hover">
+                                <div class="flex items-center justify-between mb-4">
+                                    <div class="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center text-white font-bold text-lg">
+                                        <span x-text="module.name.charAt(0).toUpperCase()"></span>
+                                    </div>
+                                    <span class="text-xs font-medium px-2 py-1 rounded-full"
+                                        :class="getStatusBadgeClass(module.status)"
+                                        x-text="module.status"></span>
+                                </div>
+                                <h3 class="text-xl font-bold text-gray-900 capitalize" x-text="module.name"></h3>
+                                <p class="text-gray-500 text-sm mt-1" x-text="module.message || 'Active'"></p>
+                                
+                                <!-- Module Details -->
+                                <div class="mt-4 space-y-2" x-show="Object.keys(module.details || {}).length > 0">
+                                    <template x-for="(value, key) in module.details" :key="key">
+                                        <div class="flex justify-between text-sm">
+                                            <span class="text-gray-500" x-text="key"></span>
+                                            <span class="font-medium text-gray-900" x-text="value"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                                
+                                <!-- Subsystems -->
+                                <div class="mt-4 pt-4 border-t border-gray-100" x-show="(module.subsystems || []).length > 0">
+                                    <p class="text-xs text-gray-400 mb-2">子系統 Subsystems</p>
+                                    <div class="space-y-1">
+                                        <template x-for="sub in module.subsystems" :key="sub.name">
+                                            <div class="flex items-center gap-2">
+                                                <span class="w-2 h-2 rounded-full" :class="getStatusDotClass(sub.status)"></span>
+                                                <span class="text-sm text-gray-600" x-text="sub.name"></span>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                                
+                                <!-- Capabilities badges -->
+                                <div class="mt-4 flex flex-wrap gap-2">
+                                    <span x-show="module.has_line_webhook"
+                                        class="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600">LINE Webhook</span>
+                                    <span x-show="module.has_api_router"
+                                        class="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-600">API Router</span>
+                                </div>
+                            </div>
+                        </template>
+                        
+                        <!-- Empty state -->
+                        <div x-show="modules.length === 0" class="col-span-full bg-white rounded-xl p-16 border border-gray-100 text-center text-gray-400">
+                            <svg class="w-12 h-12 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                            </svg>
+                            <p>No modules loaded</p>
+                        </div>
+                    </div>
+
+                    <!-- Recent Logs Preview -->
+                    <div class="bg-white rounded-xl border border-gray-100">
+                        <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                            <h2 class="font-semibold text-gray-900">最近事件 Recent Events</h2>
+                            <button @click="currentPage = 'logs'"
+                                class="text-sm text-blue-600 hover:text-blue-700 font-medium">
+                                查看全部 →
+                            </button>
+                        </div>
+                        <div class="divide-y divide-gray-50">
+                            <template x-for="log in logs.slice(0, 5)" :key="log.message">
+                                <div class="px-6 py-3 flex items-center gap-4 hover:bg-gray-50 transition-colors">
+                                    <span class="text-xs text-gray-400 font-mono w-20"
+                                        x-text="log.timestamp || '--:--:--'"></span>
+                                    <span class="text-sm text-gray-700 flex-1 truncate" x-text="log.message"></span>
+                                </div>
+                            </template>
+                            <div x-show="logs.length === 0" class="px-6 py-8 text-center text-gray-400">
+                                No recent events
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Logs Page -->
+                <div x-show="currentPage === 'logs'" x-transition class="animate-fade-in">
+                    <div class="bg-white rounded-xl border border-gray-100">
+                        <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                            <h2 class="font-semibold text-gray-900">事件日誌 Event Log</h2>
+                            <button @click="fetchLogs"
+                                class="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">
+                                <svg class="w-4 h-4" :class="{ 'animate-spin': loadingLogs }" fill="none"
+                                    stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                                Refresh
+                            </button>
+                        </div>
+                        <div class="max-h-[600px] overflow-y-auto scrollbar-thin divide-y divide-gray-50">
+                            <template x-for="(log, index) in logs" :key="index">
+                                <div class="px-6 py-3 flex items-start gap-4 hover:bg-gray-50 transition-colors">
+                                    <span class="text-xs text-gray-400 font-mono w-20 flex-shrink-0 pt-0.5"
+                                        x-text="log.timestamp || '--:--:--'"></span>
+                                    <span class="text-sm text-gray-700 break-all" x-text="log.message"></span>
+                                </div>
+                            </template>
+                            <div x-show="logs.length === 0" class="px-6 py-16 text-center text-gray-400">
+                                <svg class="w-12 h-12 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                <p>No logs available</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Modules Page -->
+                <div x-show="currentPage === 'modules'" x-transition class="animate-fade-in">
+                    <!-- Core Services -->
+                    <h2 class="text-lg font-semibold text-gray-900 mb-4">核心服務 Core Services</h2>
+                    <div class="grid gap-4 mb-8">
+                        <template x-for="service in coreServices" :key="service.name">
+                            <div class="bg-white rounded-xl p-6 border border-gray-100 card-hover">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-4">
+                                        <div class="w-12 h-12 rounded-xl flex items-center justify-center"
+                                            :class="getStatusBgColor(service.status)">
+                                            <svg x-show="service.name === 'Ragic'" class="w-6 h-6" :class="getStatusTextColor(service.status)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+                                            </svg>
+                                            <svg x-show="service.name === 'LINE Bot'" class="w-6 h-6" :class="getStatusTextColor(service.status)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                                            </svg>
+                                        </div>
+                                        <div>
+                                            <h3 class="font-semibold text-gray-900" x-text="service.name"></h3>
+                                            <div class="flex items-center gap-3 mt-1">
+                                                <span class="text-xs px-2 py-0.5 rounded-full"
+                                                    :class="getStatusBadgeClass(service.status)"
+                                                    x-text="service.message || service.status"></span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="text-right text-sm text-gray-500">
+                                        <template x-for="(value, key) in service.details" :key="key">
+                                            <div class="flex justify-end gap-2">
+                                                <span x-text="key + ':'"></span>
+                                                <span class="font-medium text-gray-700" x-text="value"></span>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                    
+                    <!-- Business Modules -->
+                    <h2 class="text-lg font-semibold text-gray-900 mb-4">業務模組 Business Modules</h2>
+                    <div class="grid gap-4">
+                        <template x-for="module in modules" :key="module.name">
+                            <div class="bg-white rounded-xl p-6 border border-gray-100 card-hover">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-4">
+                                        <div
+                                            class="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center text-white font-bold text-lg">
+                                            <span x-text="module.name.charAt(0).toUpperCase()"></span>
+                                        </div>
+                                        <div>
+                                            <h3 class="font-semibold text-gray-900 capitalize" x-text="module.name">
+                                            </h3>
+                                            <div class="flex items-center gap-3 mt-1">
+                                                <span class="text-xs px-2 py-0.5 rounded-full"
+                                                    :class="getStatusBadgeClass(module.status)"
+                                                    x-text="module.status"></span>
+                                                <span x-show="module.has_line_webhook"
+                                                    class="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600">LINE
+                                                    Webhook</span>
+                                                <span x-show="module.has_api_router"
+                                                    class="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-600">API
+                                                    Router</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center gap-4">
+                                        <!-- Module Details on the right -->
+                                        <div class="text-right text-sm text-gray-500" x-show="Object.keys(module.details || {}).length > 0">
+                                            <template x-for="(value, key) in module.details" :key="key">
+                                                <div class="flex justify-end gap-2">
+                                                    <span x-text="key + ':'"></span>
+                                                    <span class="font-medium text-gray-700" x-text="value"></span>
+                                                </div>
+                                            </template>
+                                        </div>
+                                        <span class="w-2 h-2 rounded-full animate-pulse-slow" :class="getStatusDotClass(module.status)"></span>
+                                    </div>
+                                </div>
+                                <!-- Subsystems row -->
+                                <div class="mt-4 pt-4 border-t border-gray-100 flex flex-wrap gap-4" x-show="(module.subsystems || []).length > 0">
+                                    <template x-for="sub in module.subsystems" :key="sub.name">
+                                        <div class="flex items-center gap-2 text-sm">
+                                            <span class="w-2 h-2 rounded-full" :class="getStatusDotClass(sub.status)"></span>
+                                            <span class="text-gray-600" x-text="sub.name"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+                        <div x-show="modules.length === 0"
+                            class="bg-white rounded-xl p-16 border border-gray-100 text-center text-gray-400">
+                            <svg class="w-12 h-12 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor"
+                                viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                            </svg>
+                            <p>No modules loaded</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        function dashboardApp() {
+            return {
+                currentPage: 'dashboard',
+                user: null,
+                serverStatus: null,
+                logs: [],
+                modules: [],
+                coreServices: [],
+                loadingLogs: false,
+                isRefreshing: false,
+                currentTime: '',
+                refreshInterval: null,
+                clientStartTime: null, // For smooth uptime counting
+
+                get pageTitle() {
+                    const titles = {
+                        dashboard: '儀表板 Dashboard',
+                        logs: '事件日誌 Event Log',
+                        modules: '模組管理 Modules'
+                    };
+                    return titles[this.currentPage] || 'Dashboard';
+                },
+
+                async init() {
+                    // Check auth
+                    const token = localStorage.getItem('admin_token');
+                    const expires = localStorage.getItem('admin_token_expires');
+
+                    if (!token || !expires || Date.now() > parseInt(expires)) {
+                        this.logout();
+                        return;
+                    }
+
+                    // Update time
+                    this.updateTime();
+                    setInterval(() => this.updateTime(), 1000);
+
+                    // Fetch data
+                    await this.fetchUser();
+                    await this.fetchDashboard();
+                    await this.fetchLogs();
+
+                    // Auto refresh every 2 seconds for near real-time updates
+                    // Note: We avoid 1 second to prevent hitting Rate Limits on external APIs (Ragic/LINE)
+                    this.refreshInterval = setInterval(() => {
+                        this.fetchDashboard();
+                        this.fetchLogs();
+                    }, 2000);
+                },
+
+                updateTime() {
+                    const now = new Date();
+                    this.currentTime = now.toLocaleTimeString('zh-TW', { hour12: false });
+                    
+                    // Client-side uptime tick (smooth 1s updates)
+                    if (this.serverStatus && this.clientStartTime) {
+                        const nowMs = Date.now();
+                        // Calculate uptime based on local clock relative to server start
+                        this.serverStatus.uptime_seconds = (nowMs - this.clientStartTime) / 1000;
+                    }
+                },
+
+                getAuthHeaders() {
+                    return {
+                        'Authorization': `Bearer ${localStorage.getItem('admin_token')}`,
+                        'Content-Type': 'application/json',
+                        'Pragma': 'no-cache',
+                        'Cache-Control': 'no-cache'
+                    };
+                },
+
+                async fetchUser() {
+                    try {
+                        const res = await fetch('/api/admin/auth/me', {
+                            headers: this.getAuthHeaders()
+                        });
+                        if (!res.ok) throw new Error('Unauthorized');
+                        const data = await res.json();
+                        this.user = data.user;
+                    } catch (err) {
+                        console.error('Failed to fetch user:', err);
+                        this.logout();
+                    }
+                },
+
+                async fetchStatus() {
+                    try {
+                        const res = await fetch('/api/system/status', {
+                            headers: this.getAuthHeaders()
+                        });
+                        if (res.ok) {
+                            const data = await res.json();
+                            this.serverStatus = {
+                                running: data.server.running,
+                                port: data.server.port,
+                                uptime_seconds: data.server.uptime_seconds,
+                                environment: data.environment
+                            };
+                        }
+                    } catch (err) {
+                        console.error('Failed to fetch status:', err);
+                    }
+                },
+
+                async fetchDashboard() {
+                    console.log('Fetching dashboard...');
+                    this.isRefreshing = true;
+                    try {
+                        // Add timestamp to prevent caching
+                        const res = await fetch('/api/system/dashboard?t=' + Date.now(), {
+                            headers: this.getAuthHeaders()
+                        });
+                        console.log('Dashboard response status:', res.status);
+                        
+                        if (res.ok) {
+                            const data = await res.json();
+                            
+                            // Initialize start time reference on first load or if drifted significantly
+                            const newUptime = data.server.uptime_seconds;
+                            const estimatedStartTime = Date.now() - (newUptime * 1000);
+                            
+                            if (!this.clientStartTime || Math.abs(this.clientStartTime - estimatedStartTime) > 2000) {
+                                this.clientStartTime = estimatedStartTime;
+                            }
+
+                            // Update server status but preserve local smoothed uptime if valid
+                            this.serverStatus = {
+                                running: data.server.running,
+                                port: data.server.port,
+                                uptime_seconds: this.serverStatus?.uptime_seconds || newUptime,
+                                environment: data.environment
+                            };
+                            this.coreServices = data.services || [];
+                            this.modules = data.modules || [];
+                            
+                        } else {
+                            const errorText = await res.text();
+                            console.error('Dashboard API error:', res.status, errorText);
+                        }
+                    } catch (err) {
+                        console.error('Failed to fetch dashboard:', err);
+                    } finally {
+                        this.isRefreshing = false;
+                    }
+                },
+
+                async fetchLogs() {
+                    this.loadingLogs = true;
+                    try {
+                        const res = await fetch('/api/system/logs?limit=100', {
+                            headers: this.getAuthHeaders()
+                        });
+                        if (res.ok) {
+                            const data = await res.json();
+                            this.logs = data.logs;
+                        }
+                    } catch (err) {
+                        console.error('Failed to fetch logs:', err);
+                    } finally {
+                        this.loadingLogs = false;
+                    }
+                },
+
+                async fetchModules() {
+                    try {
+                        const res = await fetch('/api/system/modules', {
+                            headers: this.getAuthHeaders()
+                        });
+                        if (res.ok) {
+                            const data = await res.json();
+                            this.modules = data.modules;
+                        }
+                    } catch (err) {
+                        console.error('Failed to fetch modules:', err);
+                    }
+                },
+
+                formatUptime(seconds) {
+                    if (!seconds) return '--:--:--';
+                    const h = Math.floor(seconds / 3600);
+                    const m = Math.floor((seconds % 3600) / 60);
+                    const s = Math.floor(seconds % 60);
+                    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+                },
+
+                // Status helper functions for dynamic styling
+                getStatusBgColor(status) {
+                    const colors = {
+                        'healthy': 'bg-green-50',
+                        'active': 'bg-green-50',
+                        'warning': 'bg-amber-50',
+                        'error': 'bg-red-50',
+                        'initializing': 'bg-blue-50'
+                    };
+                    return colors[status] || 'bg-gray-50';
+                },
+
+                getStatusTextColor(status) {
+                    const colors = {
+                        'healthy': 'text-green-600',
+                        'active': 'text-green-600',
+                        'warning': 'text-amber-600',
+                        'error': 'text-red-600',
+                        'initializing': 'text-blue-600'
+                    };
+                    return colors[status] || 'text-gray-600';
+                },
+
+                getStatusBadgeClass(status) {
+                    const classes = {
+                        'healthy': 'bg-green-50 text-green-600',
+                        'active': 'bg-green-50 text-green-600',
+                        'warning': 'bg-amber-50 text-amber-600',
+                        'error': 'bg-red-50 text-red-600',
+                        'initializing': 'bg-blue-50 text-blue-600'
+                    };
+                    return classes[status] || 'bg-gray-50 text-gray-600';
+                },
+
+                getStatusDotClass(status) {
+                    const classes = {
+                        'healthy': 'bg-green-500',
+                        'active': 'bg-green-500',
+                        'warning': 'bg-amber-500',
+                        'error': 'bg-red-500',
+                        'initializing': 'bg-blue-500'
+                    };
+                    return classes[status] || 'bg-gray-500';
+                },
+
+                getFirstDetail(details) {
+                    if (!details || Object.keys(details).length === 0) return '';
+                    const firstKey = Object.keys(details)[0];
+                    return `${firstKey}: ${details[firstKey]}`;
+                },
+
+                logout() {
+                    localStorage.removeItem('admin_token');
+                    localStorage.removeItem('admin_token_expires');
+                    if (this.refreshInterval) {
+                        clearInterval(this.refreshInterval);
+                    }
+                    window.location.href = '/static/login.html';
+                }
+            }
+        }
+    </script>
+</body>
+
+</html>

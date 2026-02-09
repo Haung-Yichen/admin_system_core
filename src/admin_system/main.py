@@ -26,7 +26,7 @@ from core.logging_config import setup_logging
 from core.registry import ModuleLoader, ModuleRegistry
 from core.server import create_base_app, set_registry
 
-# Module directory path
+# Module directory path (relative to this file's parent)
 MODULES_DIR = "modules"
 
 

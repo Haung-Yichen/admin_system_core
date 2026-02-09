@@ -39,11 +39,14 @@ dev = [
 ]
 
 [project.scripts]
-admin-system = "main:main"
+admin-system = "admin_system.main:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/admin_system"]
 
 [tool.ruff]
 target-version = "py312"
@@ -86,3 +89,4 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 addopts = "-v --tb=short"
+pythonpath = ["src/admin_system"]
